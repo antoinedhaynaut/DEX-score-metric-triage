@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DEX score metric triage</title>
+<style>
+  :root{
+    --paper:#ECEDE8; --card:#F7F7F4; --ink:#141D2B; --ink2:#39424F; --muted:#6B7280;
+    --rule:#C9CCC4; --plot:#0E6E78; --flag:#A8214B; --flag-bg:#FBF0F3; --warn:#8A5A00; --warn-bg:#FAF4E6;
+    --display:"Helvetica Neue Condensed","HelveticaNeue-CondensedBold","Arial Narrow","Liberation Sans Narrow",system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Cascadia Mono","Liberation Mono",monospace;
+    --body:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--paper);
+    background-image:repeating-linear-gradient(0deg,transparent 0 15px,rgba(20,29,43,.035) 15px 16px),
+                     repeating-linear-gradient(90deg,transparent 0 15px,rgba(20,29,43,.035) 15px 16px);
+    color:var(--ink); font-family:var(--body); font-size:14px; line-height:1.5;}
+  .disp{font-family:var(--display); font-stretch:condensed; text-transform:uppercase; letter-spacing:.045em; font-weight:700;}
+  .mono{font-family:var(--mono);}
+
+  header{border-bottom:2px solid var(--ink); padding:22px 24px 16px; max-width:1340px; margin:0 auto;}
+  h1{margin:0; font-size:30px;}
+
+  .shell{max-width:1340px; margin:0 auto; display:grid; grid-template-columns:210px 1fr; gap:0 26px; padding:20px 24px 60px;}
+  .rail{position:sticky; top:16px; align-self:start;}
+  .rail .lab{font-size:10px; letter-spacing:.12em; color:var(--muted); padding:0 0 8px;}
+  .tab{display:block; width:100%; text-align:left; background:transparent; border:0; border-top:1px solid var(--rule);
+       padding:10px 10px 10px 12px; cursor:pointer; color:var(--ink2); font-family:inherit; position:relative;}
+  .tab:last-child{border-bottom:1px solid var(--rule);}
+  .tab .nm{font-family:var(--display); font-stretch:condensed; text-transform:uppercase; letter-spacing:.045em; font-weight:700; font-size:15px; display:block; color:var(--ink);}
+  .tab .un{font-family:var(--mono); font-size:10px; color:var(--muted); display:block; margin-top:2px;}
+  .tab:hover{background:var(--card);}
+  .tab[aria-selected="true"]{background:var(--card);}
+  .tab[aria-selected="true"]::before{content:""; position:absolute; left:-1px; top:-1px; bottom:-1px; width:3px; background:var(--plot);}
+  .tab:focus-visible{outline:2px solid var(--plot); outline-offset:-2px;}
+
+  .panel[hidden]{display:none}
+  .mhead{border-bottom:1px solid var(--rule); padding-bottom:14px;}
+  .mhead h2{margin:0; font-size:26px;}
+  .mhead .what{margin:5px 0 0; color:var(--ink2);}
+
+  .qualify{margin:16px 0 0; background:var(--card); border:1px solid var(--rule); border-left:3px solid var(--flag);}
+  .qualify > b{display:block; font-size:10px; letter-spacing:.12em; color:var(--flag); padding:9px 14px 0;}
+  .qualify ul{margin:6px 0 0; padding:0 14px 12px 30px;}
+  .qualify li{margin:4px 0; color:var(--ink2);}
+
+  .hub{margin:16px 0 0; background:var(--warn-bg); border:1px solid #E4D5AE; border-left:3px solid var(--warn);}
+  .hub > b{display:block; font-size:10px; letter-spacing:.12em; color:var(--warn); padding:9px 14px 0;}
+  .hub p{margin:6px 14px 0; color:var(--ink2); font-size:13px;}
+  .hub ul{margin:6px 0 0; padding:0 14px 12px 30px;}
+  .hub li{margin:4px 0; color:var(--ink2); font-size:13px;}
+  .hub .close{padding:0 14px 12px;}
+
+  .mode{margin:18px 0 0; display:flex; gap:0; border:2px solid var(--ink); width:fit-content;}
+  .mode button{font-family:var(--display); font-stretch:condensed; text-transform:uppercase; letter-spacing:.05em; font-weight:700;
+    font-size:15px; padding:8px 22px; border:0; background:transparent; color:var(--muted); cursor:pointer;}
+  .mode button + button{border-left:2px solid var(--ink);}
+  .mode button[aria-pressed="true"]{background:var(--ink); color:var(--paper);}
+  .mode button:focus-visible{outline:2px solid var(--plot); outline-offset:2px;}
+  .modenote{margin:8px 0 0; font-family:var(--mono); font-size:11px; color:var(--muted);}
+
+  .predisc{margin:14px 0 0; background:var(--warn-bg); border:1px solid #E4D5AE; border-left:3px solid var(--warn);}
+  .predisc b{display:block; font-size:10px; letter-spacing:.12em; color:var(--warn); padding:9px 14px 0;}
+  .predisc p{margin:6px 14px 0; color:var(--ink2); font-size:13px;}
+  .predisc ul{margin:6px 0 0; padding:0 14px 4px 30px;}
+  .predisc li{margin:4px 0; color:var(--ink2); font-size:13px;}
+  .predisc .close{padding:2px 14px 12px;}
+
+  .legend{display:flex; flex-wrap:wrap; gap:6px 20px; margin:14px 0 0; padding:10px 14px; border:1px dashed var(--rule);}
+  .legend .lg{display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:10.5px; color:var(--muted);}
+
+  .flow{margin:24px 0 0 12px; padding-left:28px; border-left:2px solid var(--rule);}
+  .node{position:relative; margin:0 0 4px;}
+  .node::before{content:""; position:absolute; left:-35px; top:9px; width:10px; height:10px; border-radius:50%;
+                background:var(--plot); border:2px solid var(--paper);}
+  .node .n{font-family:var(--mono); font-size:11px; color:var(--plot);}
+  .node .q{font-family:var(--display); font-stretch:condensed; text-transform:uppercase; letter-spacing:.04em; font-weight:700; font-size:17px; margin-top:1px;}
+  .node .hint{font-size:12.5px; color:var(--ink2); margin-top:3px;}
+  .exits{margin:10px 0 0 10px; padding-left:22px; border-left:1px dashed var(--rule);}
+  .cont{margin:14px 0 22px; font-family:var(--mono); font-size:11px; color:var(--plot);}
+  .cont::before{content:"↓ ";}
+  .exit{margin:0 0 14px;}
+  .branch{font-family:var(--mono); font-size:10.5px; color:var(--muted); margin-bottom:5px;}
+  .branch::before{content:"→ ";}
+
+  .card{background:var(--card); border:1px solid var(--rule); padding:11px 13px;}
+  .card.note{border-left:3px solid var(--muted);}
+  .card.hyp{border-left:3px solid var(--flag); background:var(--flag-bg);}
+  .ctop{display:flex; align-items:flex-start; gap:10px; justify-content:space-between;}
+  .ct{font-weight:650; font-size:14px;}
+  .cs{color:var(--muted); font-size:12px; margin:2px 0 0;}
+  .card p{margin:7px 0 0; color:var(--ink2); font-size:13px;}
+  dl{margin:9px 0 0; display:grid; grid-template-columns:96px 1fr; gap:3px 10px; font-size:12.5px;}
+  dt{font-family:var(--mono); font-size:9.5px; letter-spacing:.08em; color:var(--muted); text-transform:uppercase; padding-top:2px;}
+  dd{margin:0; color:var(--ink2);}
+  dt.act{color:var(--flag);}
+
+  .trace{flex:none} .trace path{fill:none; stroke:currentColor; stroke-width:1.5; stroke-linejoin:round; stroke-linecap:round;}
+  .trace .base{stroke:var(--rule); stroke-width:1; stroke-dasharray:2 3;}
+  .card .trace{color:var(--flag)} .legend .trace{color:var(--ink2)}
+
+  .bblock{border:1px solid var(--rule); background:rgba(255,255,255,.45); margin:0 0 16px;}
+  .bblock > h4{margin:0; padding:9px 13px; font-size:15px; border-bottom:1px solid var(--rule); background:var(--card);}
+  .bblock > .in{padding:13px;}
+  .caution{background:var(--warn-bg); border:1px solid #E4D5AE; border-left:3px solid var(--warn); padding:9px 12px; margin:0 0 14px;}
+  .caution b{font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; color:var(--warn); display:block; margin-bottom:3px;}
+  .caution p{margin:0 0 6px; font-size:12.5px; color:var(--ink2);} .caution p:last-child{margin:0}
+
+  .dim{margin:0 0 16px;} .dim:last-child{margin:0}
+  .dimh{font-family:var(--mono); font-size:11px; color:var(--plot); border-bottom:1px dotted var(--rule); padding-bottom:3px; margin-bottom:8px;}
+  .dimh .al{color:var(--muted);}
+  .stack{display:grid; gap:10px;}
+
+  .verify{margin:26px 0 0; border:2px solid var(--ink); background:var(--card);}
+  .verify h3{margin:0; padding:11px 14px; font-size:16px; border-bottom:1px solid var(--rule);}
+  .verify .in{padding:12px 14px; font-size:13px; color:var(--ink2);}
+  .verify .in b{font-family:var(--mono); font-size:10px; letter-spacing:.1em; color:var(--muted); display:block; margin-bottom:3px;}
+  .verify .in p{margin:0 0 10px} .verify .in p:last-child{margin:0}
+
+  footer{max-width:1340px; margin:0 auto; padding:14px 24px 50px; color:var(--muted); font-size:11.5px; border-top:1px solid var(--rule);}
+
+  /* natural-language query block */
+  .nlq{margin:10px 0 0; border:1px solid var(--plot); background:rgba(14,110,120,.05);}
+  .nlq .nlqh{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 10px; border-bottom:1px solid rgba(14,110,120,.25);}
+  .nlq .nlqh .lbl{font-family:var(--mono); font-size:9.5px; letter-spacing:.11em; color:var(--plot); font-weight:700;}
+  .nlq .cpy{font-family:var(--mono); font-size:10px; letter-spacing:.04em; color:var(--plot); background:transparent; border:1px solid var(--plot); padding:2px 9px; cursor:pointer; white-space:nowrap;}
+  .nlq .cpy:hover{background:var(--plot); color:#fff;}
+  .nlq .cpy:focus-visible{outline:2px solid var(--plot); outline-offset:2px;}
+  .nlq .cpy.done{background:var(--plot); color:#fff;}
+  .nlq .qtext{margin:0; padding:9px 11px; font-family:var(--mono); font-size:12px; line-height:1.55; color:var(--ink); white-space:pre-wrap;}
+  .nlq.tight{margin-top:8px;}
+  .exits .nlq{margin-left:0;}
+
+  @media (max-width:900px){
+    .shell{grid-template-columns:1fr; padding:16px 14px 50px;}
+    .rail{position:static; display:flex; gap:8px; overflow-x:auto; padding-bottom:6px;}
+    .rail .lab{display:none}
+    .tab{border:1px solid var(--rule); flex:none; width:auto; padding:8px 12px;}
+    .tab[aria-selected="true"]::before{left:-1px; right:-1px; top:-1px; bottom:auto; width:auto; height:3px;}
+    dl{grid-template-columns:88px 1fr}
+    header,footer{padding-left:14px; padding-right:14px;}
+  }
+  @media print{ body{background:#fff} .rail,.mode{display:none} .shell{display:block} .panel[hidden]{display:block!important} .panel{page-break-before:always} }
+  @media (prefers-reduced-motion:no-preference){ .panel{animation:in .16s ease-out} @keyframes in{from{opacity:0}to{opacity:1}} }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 class="disp">DEX score metric triage</h1>
+</header>
+
+<div class="shell">
+  <nav class="rail" role="tablist" aria-label="Metric"><div class="lab mono">METRIC</div></nav>
+  <main id="panels"></main>
+</div>
+
+<footer class="mono">
+  A pattern is a rate, not a count. At fleet scale a large number of affected devices is expected; the question is whether they share an attribute. Compare the affected rate within a segment against the fleet rate, and trust only the dimension that remains once the correlated dimensions are held constant.
+</footer>
+
+<script>
+const SHAPES = {
+  flathigh:{d:"M2,6 L62,6", t:"level and elevated — a baseline, not an event"},
+  flatlow:{d:"M2,17 L62,17", t:"level and low — persistent, never moved"},
+  sawtooth:{d:"M2,17 L14,5 L14,17 L26,5 L26,17 L38,5 L38,17 L50,5 L50,17 L60,9", t:"sawtooth — accumulates, resets on restart"},
+  periodic:{d:"M2,17 L10,17 L12,5 L14,17 L30,17 L32,5 L34,17 L50,17 L52,5 L54,17 L62,17", t:"periodic — a schedule"},
+  hump:{d:"M2,17 C14,17 16,5 32,5 C48,5 50,17 62,17", t:"working-hours rise — user activity"},
+  step:{d:"M2,17 L30,17 L30,7 L62,7", t:"step change — a deployment or configuration change"},
+  noisy:{d:"M2,14 L8,9 L14,16 L20,7 L26,15 L32,8 L38,16 L44,10 L50,14 L56,7 L62,13", t:"erratic — contention or failing hardware"},
+  dip:{d:"M2,6 L18,6 L24,17 L40,17 L46,6 L62,6", t:"drops in place — coverage or roaming"},
+  burst:{d:"M2,17 L16,17 L18,5 L26,5 L28,17 L62,17", t:"a single peak at a fixed time"},
+  creep:{d:"M2,17 L62,7", t:"gradual increase — accumulation over time"}
+};
+const trace = k => SHAPES[k] ? `<svg class="trace" width="64" height="22" viewBox="0 0 64 22" aria-hidden="true"><path class="base" d="M2,20 L62,20"/><path d="${SHAPES[k].d}"/></svg>` : "";
+
+const note = (title, body) => ({kind:"note", title, body, mode:"both"});
+const hyp = (title, sub, shape, o) => ({kind:"hyp", title, sub, shape, mode:"both", ...o});
+
+const TREES = [
+{
+  id:"swaprate", name:"Memory swap rate", unit:"MB/s",
+  what:"The volume of memory paged to and from disk per unit of time. This is the metric that corresponds to a degraded experience: sustained paging activity makes a device slow to respond. It is a consequence of memory pressure, an application leak, or storage that cannot keep pace — not a cause in itself.",
+  qualify:[
+    "<b>Rate is the symptom users feel; size is context.</b> A large page file that is not being written to has little effect. Confirm the rate first, then use swap size and the memory ratio to explain it.",
+    "<b>A daily average conceals a short, severe episode.</b> Re-examine the metric at its native resolution before drawing conclusions about its shape.",
+    "<b>macOS compresses memory before paging.</b> A threshold defined for Windows will misclassify macOS devices.",
+    "<b>On virtual desktops, the guest is the affected party.</b> Host memory overcommitment presents as paging inside the guest, and no action on the endpoint will resolve it."
+  ],
+  legend:["sawtooth","flathigh","periodic","hump"],
+  gates:[
+    {q:"Is physical memory genuinely under pressure?", hint:"Compare used memory against installed memory at the moment the rate rises.", cont:"Yes — the memory ratio is high", exits:[
+      {b:"No — high paging with normal memory headroom", c:hyp("Page file or storage configuration","Paging activity that is not driven by a shortage of memory","noisy",{
+        confirms:"High paging rate while the memory ratio remains comfortable; low free space on the system drive, or a fixed-size page file that forces continual paging.",
+        kills:"The memory ratio is genuinely at its limit.",
+        now:"Reclaim disk space so the page file can size itself appropriately.",
+        structural:"Correct the page file policy. Treat this as a build configuration issue rather than a per-device incident."})}
+    ]}
+  ],
+  dims:[
+    {dim:"Hardware model and installed memory", alias:"correlates with the refresh cycle and the purchase cohort", cards:[
+      hyp("Insufficient memory baseline","A hardware cohort with no memory headroom","flathigh",{mode:"improve",
+        confirms:"The affected rate is far higher within one model-and-memory cohort than across the fleet; a comparable cohort with more memory in the same role is unaffected; usage sits close to the limit even at rest.",
+        kills:"The affected rate is consistent across memory sizes.",
+        now:"No tactical action holds. A restart provides temporary relief only.",
+        structural:"Memory upgrade or hardware refresh for the cohort. This is a budget decision and should be presented as one, supported by the experience data."}),
+      hyp("Workload has outgrown a fixed baseline","The hardware remained constant while application demand increased","creep",{mode:"recover",
+        confirms:"A gradual increase with no clear onset date; the same cohort performed acceptably a year earlier; the memory footprint has grown across several applications rather than one.",
+        kills:"A clear onset date exists.",
+        now:"Recognise that this will not recover to a prior state — it is an improvement question recorded as a recovery.",
+        structural:"Set the memory baseline against the current application portfolio rather than the requirement at time of purchase."})
+    ]},
+    {dim:"Application or agent version", alias:"the most direct dimension, and usually the answer when an onset date exists", cards:[
+      hyp("Version regression or memory leak","A single version, deployment, and date","sawtooth",{mode:"recover",
+        confirms:"The onset matches the deployment; memory rises and resets when the process restarts; the affected rate separates clearly by version; a cohort kept on the prior version is unaffected.",
+        kills:"All versions are affected equally.",
+        now:"Restart the process for temporary relief; pin or roll back the version.",
+        structural:"Raise a vendor case; add memory footprint to the release acceptance test for this application, which is rarely measured.",
+        watch:"Child processes are attributed to their parent. A browser engine running inside another application is reported under that application. Examine the process tree rather than the process name."})
+    ]},
+    {dim:"Operating system build or image generation", alias:"correlates with the imaging wave, which correlates with location", cards:[
+      hyp("Build or servicing regression","The image or the platform changed","step",{mode:"recover",
+        confirms:"The affected rate separates by build; the onset matches the servicing ring; the consuming processes are system components rather than user applications.",
+        kills:"Builds are affected evenly.",
+        now:"Hold the servicing ring.",
+        structural:"Add the metric to build acceptance testing; raise the regression with the platform vendor, supported by the cohort evidence."})
+    ]},
+    {dim:"Business unit or role", alias:"frequently a location or an application-entitlement pattern in disguise", cards:[
+      hyp("Role-based workload","Demanding work performed on hardware provisioned for lighter use","hump",{mode:"both",
+        confirms:"The affected rate concentrates in one function; a working-hours shape; the consuming process is a line-of-business application or the browser.",
+        kills:"The rate is evenly distributed across functions.",
+        now:"Confirm the pattern with the group before acting; this may reflect the nature of the work.",
+        structural:"Provision hardware for the role, or move the workload off the endpoint. A role with higher demand should be resourced accordingly."})
+    ]}
+  ],
+  randomRecover:[
+    hyp("Fleet-wide application update","Deployed to everyone, so the pattern is the whole fleet","step",{
+      confirms:"A single onset date across all segments; the affected rate is uniform across every dimension; the application is universally deployed.",
+      kills:"Any segment is materially cleaner than the fleet.",
+      now:"Identify what was deployed on the onset date. Universal deployment with no cohort is itself the evidence, not the absence of it.",
+      structural:"Staged deployment rings, so that the next occurrence is confined to a cohort rather than the entire fleet."}),
+    hyp("Fleet-wide policy or configuration change","A setting rather than a package","step",{
+      confirms:"An onset with no application version change; a policy, agent configuration, or feature setting changed on that date.",
+      kills:"Version differences are present.",
+      now:"Reverse the change for a pilot group and compare.",
+      structural:"Include experience metrics in change review, alongside security and compliance approval."})
+  ],
+  randomImprove:[
+    hyp("Fleet memory baseline","The estate as a whole, not a cohort","flathigh",{
+      confirms:"Pressure is uniform; even the newest devices sit near the limit; no segment is materially cleaner.",
+      kills:"A clean cohort exists — in which case this is a cohort issue.",
+      now:"No tactical action.",
+      structural:"The baseline itself is the plan. Everything else is a workaround."}),
+    hyp("Resident agent portfolio","Many background agents, each reasonable, collectively significant","flathigh",{
+      confirms:"Consumption is dominated by background agents rather than by the application in use; the total is high with no single dominant process.",
+      kills:"One process dominates.",
+      now:"Inventory what runs permanently and identify an owner for each. Most have none.",
+      structural:"An approval step for anything that runs continuously, and a periodic review. This accumulates because nothing removes it."}),
+    hyp("No restart routine","Uptime measured in weeks","creep",{
+      confirms:"Paging correlates with uptime rather than with any device attribute; a restart resets it for several days.",
+      kills:"Recently restarted devices page just as heavily.",
+      now:"Prompt users to restart.",
+      structural:"A restart expectation that users can accommodate. This is inexpensive and effective, which is why it is often overlooked."})
+  ],
+  verify:"Swap rate at native resolution, affected cohort against the control group. A version rollback should show within a day; a memory change shows immediately; a restart routine appears as a sawtooth with a shorter period.",
+  correlate:"Read alongside swap size and the memory ratio. Rate is the symptom; size and ratio explain whether the cause is pressure, a leak, or configuration."
+},
+
+{
+  id:"swapsize", name:"Memory swap size", unit:"GB",
+  what:"The volume of memory currently held in the page file. On its own this is a weaker indicator than swap rate: a large page file that is not being actively written to has limited effect on responsiveness. Its value is as corroboration — it distinguishes sustained memory pressure from a transient spike.",
+  qualify:[
+    "<b>Size without rate is often harmless.</b> A large page file that is stable indicates memory was committed at some point, not that the device is currently paging. Confirm whether swap rate is also elevated before treating this as an incident.",
+    "<b>Size that grows steadily is the signal to watch.</b> A gradual, monotonic increase indicates commitment that is not being released — the signature of a leak.",
+    "<b>Interpret against installed memory.</b> A given page file size means something very different on an 8 GB device than on a 32 GB one.",
+    "<b>On virtual desktops, the guest is the affected party.</b> Host memory overcommitment inflates guest paging, and no endpoint action will resolve it."
+  ],
+  legend:["creep","flathigh","sawtooth","step"],
+  gates:[
+    {q:"Is swap size stable or growing?", hint:"A stable large page file and a steadily growing one have different causes.", cont:"Growing over time", exits:[
+      {b:"Stable and large", c:hyp("Committed but not active","Memory was committed and retained, but the device is not currently paging","flathigh",{
+        confirms:"Swap size is high and level; swap rate is low; responsiveness is acceptable; the memory ratio is not at its limit.",
+        kills:"Swap rate is also elevated — in which case this is a memory-pressure case, and the swap rate tab applies.",
+        now:"Usually no action is warranted. Confirm there is no impact before proceeding.",
+        structural:"If this generates alerts without impact, the threshold is set on the wrong metric. Alert on swap rate and the memory ratio, using size as context."})}
+    ]}
+  ],
+  dims:[
+    {dim:"Application or agent version", alias:"the most direct dimension for a growing page file", cards:[
+      hyp("Memory leak in a specific version","Commitment that is never released","creep",{mode:"recover",
+        confirms:"Swap size climbs steadily and resets on process restart; the onset matches a deployment; the affected rate separates by version.",
+        kills:"All versions grow at the same rate.",
+        now:"Restart the process to reset it; pin or roll back the version.",
+        structural:"Vendor case; add a sustained memory-footprint test to release acceptance.",
+        watch:"Attribute to the correct process — child processes are reported under their parent."})
+    ]},
+    {dim:"Hardware model and installed memory", alias:"correlates with the refresh cycle and purchase cohort", cards:[
+      hyp("Small memory forcing early commitment","Devices that commit to the page file under normal load","flathigh",{mode:"improve",
+        confirms:"Swap size is proportionally high on the smaller-memory cohort even under routine use; a larger-memory cohort in the same role commits far less.",
+        kills:"Page file size is comparable across memory sizes.",
+        now:"No tactical action.",
+        structural:"Memory upgrade or refresh for the cohort, presented as a budget decision with the experience data."})
+    ]},
+    {dim:"Business unit or role", alias:"often a location or entitlement pattern", cards:[
+      hyp("Role-based memory demand","A function whose applications commit more memory","hump",{mode:"both",
+        confirms:"Swap size concentrates in one function; the consuming applications are specific to that role.",
+        kills:"Evenly distributed across functions.",
+        now:"Confirm with the group; this may be normal for the work.",
+        structural:"Provision memory for the role."})
+    ]}
+  ],
+  randomRecover:[
+    hyp("Fleet-wide update that raised memory commitment","A change that increased baseline memory use across the estate","step",{
+      confirms:"A single onset date across all segments; page file size stepped up fleet-wide; an application or platform update landed then.",
+      kills:"Any segment is materially cleaner.",
+      now:"Identify what was deployed on the onset date.",
+      structural:"Staged rings; memory footprint in release acceptance."})
+  ],
+  randomImprove:[
+    hyp("Fleet memory baseline","The estate commits to the page file under routine load","flathigh",{
+      confirms:"Page file commitment is uniformly high; even newer devices commit under normal use; no clean segment.",
+      kills:"A clean cohort exists.",
+      now:"No tactical action.",
+      structural:"The memory baseline is the plan."}),
+    hyp("No restart routine","Commitment accumulates over long uptimes","creep",{
+      confirms:"Swap size correlates with uptime; a restart resets it.",
+      kills:"Recently restarted devices show the same size.",
+      now:"Prompt users to restart.",
+      structural:"A workable restart expectation."})
+  ],
+  verify:"Swap size trend at native resolution, affected cohort against control. A leak fix flattens the growth curve; a memory upgrade lowers the committed size immediately.",
+  correlate:"Read alongside swap rate and the memory ratio. A high size with a low rate is usually benign; a high size with a high rate and a high ratio is genuine pressure. A steadily rising size, whatever the rate, points to a leak."
+},
+
+{
+  id:"cpuint", name:"CPU interrupt usage", unit:"% of CPU time",
+  what:"The share of processor time spent servicing hardware interrupts and deferred procedure calls. Elevated interrupt time indicates the processor is being consumed by device and driver activity rather than by applications. It is almost always a driver, firmware, or hardware matter rather than a workload one, which makes its diagnostic path distinct from general CPU usage.",
+  qualify:[
+    "<b>Interrupt time is not application load.</b> High interrupt usage with low overall CPU points to a device or driver, not to a busy user. Do not treat it as a capacity problem.",
+    "<b>Distinguish it from total CPU usage.</b> A device can show high interrupt time while total CPU is modest. The two metrics have different owners and different remedies.",
+    "<b>The cause is usually a single device or driver.</b> Network adapters, storage controllers, and audio devices are common sources, often after a driver update.",
+    "<b>Re-examine at native resolution.</b> Interrupt storms are frequently short and intense, and a daily average will understate them."
+  ],
+  legend:["step","noisy","flathigh","periodic"],
+  gates:[
+    {q:"Is total CPU usage also high, or is interrupt time high in isolation?", hint:"This separates a device or driver problem from a genuine workload problem.", cont:"Interrupt time is high in isolation", exits:[
+      {b:"Total CPU is also high", c:note("This is a workload question, not an interrupt one","When total CPU is high and interrupt time is a normal share of it, the processor is busy doing work. Investigate the consuming applications and processes rather than pursuing the interrupt metric, which is behaving as expected under load.")}
+    ]}
+  ],
+  dims:[
+    {dim:"Device model and driver revision", alias:"the primary dimension for interrupt time; correlates with the refresh cycle", cards:[
+      hyp("Driver regression","A driver update that increased interrupt overhead","step",{mode:"recover",
+        confirms:"The affected rate concentrates on one device model and driver revision; the onset matches the driver deployment; the same model on the prior driver is unaffected.",
+        kills:"The rate is distributed across models and revisions.",
+        now:"Hold the driver rollout; roll back on a pilot group.",
+        structural:"Add interrupt usage to driver validation. This is a routine regression that ships because it is seldom tested."})
+    ]},
+    {dim:"Peripheral or dock model", alias:"correlates with role and location", cards:[
+      hyp("Peripheral or dock driver","An external device or its driver generating excess interrupts","noisy",{mode:"both",
+        confirms:"The affected rate concentrates among users of a specific dock, adapter, or peripheral; the pattern follows the peripheral rather than the device model; often a network or display path through the dock.",
+        kills:"No association with any peripheral.",
+        now:"Update or replace the peripheral driver; test with the peripheral disconnected.",
+        structural:"Standardise and validate peripheral and dock firmware; add them to the supported-hardware baseline."})
+    ]},
+    {dim:"Firmware or BIOS version", alias:"correlates with model and imaging wave", cards:[
+      hyp("Firmware-level regression","A firmware or BIOS revision affecting interrupt handling","step",{mode:"recover",
+        confirms:"The affected rate concentrates on one firmware revision; the onset matches the firmware rollout; a control group on the prior revision is unaffected.",
+        kills:"Distributed across firmware revisions.",
+        now:"Hold the firmware rollout.",
+        structural:"Firmware package correction; vendor case with the cohort evidence; add firmware to the build baseline."})
+    ]},
+    {dim:"Business unit or role", alias:"frequently a peripheral or location pattern", cards:[
+      hyp("Role-specific hardware","A device class particular to one function","noisy",{mode:"both",
+        confirms:"The affected rate concentrates in a function that uses specific hardware — imaging equipment, capture devices, specialised adapters.",
+        kills:"Evenly distributed across functions.",
+        now:"Identify the device class and update its driver.",
+        structural:"Bring the role-specific hardware into the standard validation process."})
+    ]}
+  ],
+  randomRecover:[
+    hyp("Fleet-wide driver push","A driver deployed to the whole estate","step",{
+      confirms:"A single onset date across all segments; no model or revision split; a driver was deployed to everyone on that date.",
+      kills:"Any segment is materially cleaner.",
+      now:"Work from the onset date rather than device attributes. The absence of a cohort is the evidence.",
+      structural:"Staged rings for driver deployment."}),
+    hyp("Fleet-wide platform or security agent","An agent that intercepts device activity","step",{
+      confirms:"An onset with no driver change; a security or endpoint agent that operates at the device or network layer was updated then.",
+      kills:"A device-side split exists.",
+      now:"Correlate the onset with agent deployment records; test with the agent's relevant feature disabled on a pilot.",
+      structural:"Include interrupt and CPU overhead in agent acceptance testing."})
+  ],
+  randomImprove:[
+    hyp("Aging hardware baseline","Older devices with less efficient interrupt handling","flathigh",{
+      confirms:"Interrupt overhead is uniformly higher on an older generation across the estate; newer hardware in the same role is measurably better but too few to shift the average.",
+      kills:"A clean cohort exists.",
+      now:"No tactical action.",
+      structural:"Hardware refresh, framed against the cumulative productivity cost."}),
+    hyp("Standard driver set is dated","The fleet runs old drivers by default","flathigh",{
+      confirms:"Interrupt overhead is broadly elevated; driver versions across the estate are well behind current releases; no single cohort stands out.",
+      kills:"Drivers are current and the problem persists.",
+      now:"Identify the most impactful driver to update first.",
+      structural:"A driver currency policy, so the fleet does not drift years behind."})
+  ],
+  verify:"Interrupt time against total CPU at native resolution, affected cohort against control. A driver or firmware correction shows on the next cycle after deployment; a peripheral fix shows once the device is updated or replaced.",
+  correlate:"Read alongside total CPU usage to confirm the problem is interrupt-driven, and alongside the relevant device metric — network or storage — since the same driver often degrades both."
+},
+
+{
+  id:"freespace", name:"System free space", unit:"GB",
+  what:"Available space on the system drive. This metric deserves particular attention because it is frequently the origin of problems that surface elsewhere. When free space is low, the page file cannot grow, which produces memory-allocation failures and application instability even when physical memory is adequate; logon slows, because profile and temporary-file operations require writable space; applications freeze or crash when temporary directories cannot be written; and disk performance degrades as the drive fills. If you arrived here from a memory, logon, or application-stability symptom, resolving free space may resolve the original complaint.",
+  qualify:[
+    "<b>Check free space early when investigating other symptoms.</b> Low system-drive space is a documented cause of paging failures, slow logon, and application crashes. It is often the root cause behind a metric that appears unrelated.",
+    "<b>Absolute gigabytes matter more than percentage.</b> The page file, temporary files, and update staging need a working amount of space; a large drive at 95% may still have room, while a small drive at 90% may not.",
+    "<b>Distinguish a full drive from a filling drive.</b> A drive that is stable near its limit is a baseline condition; a drive filling steadily will reach zero on a predictable schedule.",
+    "<b>Confirm it is the system drive.</b> Space on a data or secondary volume does not relieve pressure on the system drive, where the page file and profiles reside."
+  ],
+  legend:["creep","flatlow","step","flathigh"],
+  hub:{
+    lead:"This metric is a common root cause. Before treating low free space as an isolated issue, consider whether it is producing a symptom you are investigating elsewhere:",
+    items:[
+      "<b>Memory metrics.</b> A near-full drive prevents the page file from growing, causing allocation failures and swap-configuration problems that present as memory pressure.",
+      "<b>Logon speed.</b> Profile loading and temporary-file creation need writable space; a full drive slows or fails logon.",
+      "<b>Application stability.</b> Applications that cannot write to temporary directories freeze or crash, independent of memory or CPU.",
+      "<b>Disk performance.</b> A full, fragmented drive degrades I/O and raises the disk queue."
+    ],
+    close:"If any of these is your entry symptom, resolve free space first and re-measure the original metric before investigating it further."
+  },
+  gates:[
+    {q:"Is the drive stable near its limit, or filling over time?", hint:"A steady-state full drive and a filling one lead to different remedies.", cont:"Filling steadily over time", exits:[
+      {b:"Stable near the limit", c:hyp("Undersized system drive for the standard build","The build and its data do not fit comfortably on the provisioned drive","flatlow",{
+        confirms:"Free space is chronically low but stable; the standard image, applications, and profile leave little headroom on this drive size; the affected rate concentrates on a smaller-drive cohort.",
+        kills:"The drive has ample capacity and is filling from a specific source.",
+        now:"Reclaim what can be reclaimed, but recognise the headroom is structurally thin.",
+        structural:"Increase the provisioned drive size for the cohort, or reduce the image and profile footprint. This is a baseline decision."})}
+    ]}
+  ],
+  dims:[
+    {dim:"Application or agent version", alias:"the usual source of runaway growth", cards:[
+      hyp("Log, cache, or update growth","An application or agent that writes without bound","creep",{mode:"recover",
+        confirms:"Free space falls steadily; the growth traces to a specific application's logs, cache, or update staging; the onset matches a version or configuration change.",
+        kills:"No single directory accounts for the growth.",
+        now:"Clear the offending directory; correct the retention or cache setting.",
+        structural:"Bound the log and cache size in configuration; raise a vendor case if the default is unbounded."})
+    ]},
+    {dim:"Hardware model and drive size", alias:"correlates with the refresh cycle and purchase cohort", cards:[
+      hyp("Undersized drive cohort","A hardware generation provisioned with too little storage","flatlow",{mode:"improve",
+        confirms:"The affected rate concentrates on one drive-size cohort; a larger-drive cohort in the same role has adequate headroom; the shortfall is present regardless of user behaviour.",
+        kills:"Drive size is comparable across the affected and control groups.",
+        now:"Reclaim space to buy time.",
+        structural:"Increase drive size at refresh, or reduce the standard footprint. A budget decision supported by the downstream impact on memory, logon, and stability."})
+    ]},
+    {dim:"Operating system build or image", alias:"correlates with the imaging wave and location", cards:[
+      hyp("Image or update footprint","The build itself, or its update retention, consumes the space","step",{mode:"recover",
+        confirms:"The affected rate separates by image generation; free space dropped after an image or servicing change; update or component stores are large.",
+        kills:"Image generations are affected evenly.",
+        now:"Clean up the component and update stores.",
+        structural:"Manage update retention in the build; add free-space headroom to image acceptance."})
+    ]},
+    {dim:"Business unit or role", alias:"often a location or an application-entitlement pattern", cards:[
+      hyp("Role-based data accumulation","A function that stores large volumes of data locally","hump",{mode:"both",
+        confirms:"The affected rate concentrates in one function; the space is consumed by role-specific data or applications.",
+        kills:"Evenly distributed across functions.",
+        now:"Confirm with the group; provide guidance on local versus managed storage.",
+        structural:"Provision storage for the role, or redirect the data to a managed location."})
+    ]}
+  ],
+  randomRecover:[
+    hyp("Fleet-wide update or agent change","A change that consumed space across the estate","step",{
+      confirms:"Free space dropped on a single date across all segments; an update, agent, or retention change landed then; no model or build split.",
+      kills:"Any segment is materially cleaner.",
+      now:"Identify what was deployed on the onset date and reclaim the space it consumed.",
+      structural:"Include free-space impact in change review; staged rings for large deployments."})
+  ],
+  randomImprove:[
+    hyp("Standard footprint leaves no headroom","The build, applications, and profile fill the standard drive across the fleet","flatlow",{
+      confirms:"Free space is chronically low across the estate regardless of cohort; the standard footprint consumes most of the standard drive.",
+      kills:"A clean cohort exists.",
+      now:"Fleet-wide cleanup provides temporary relief only.",
+      structural:"Increase the standard drive size or reduce the standard footprint. Given the downstream effects, this is often the highest-leverage single change available."}),
+    hyp("No reclamation routine","Nothing clears space, so every drive fills over time","creep",{
+      confirms:"Free space trends downward across the fleet; there is no automated cleanup; the decline is gradual and universal.",
+      kills:"Free space is stable.",
+      now:"A one-off reclamation pass.",
+      structural:"Automated, scheduled reclamation. Without it, low free space and its downstream symptoms return on a predictable cycle."})
+  ],
+  verify:"Free space in gigabytes on the system drive, affected cohort against control. A cleanup shows immediately; a retention or footprint change shows as a flattening of the decline. Where free space was the root cause, re-measure the original symptom — memory, logon, or stability — to confirm it resolved.",
+  correlate:"This metric is often upstream of others. When it is low, re-check memory paging, logon duration, and application stability before attributing those to their own causes."
+},
+
+{
+  id:"disk", name:"Disk queue", unit:"queue depth",
+  what:"The number of I/O requests waiting on the storage device. On a single-spindle disk, a sustained queue of one indicates saturation. On modern solid-state storage, deep parallel queues are normal and carry little meaning without corresponding latency.",
+  qualify:[
+    "<b>The storage technology sets the threshold.</b> A threshold defined for a mechanical disk applied to NVMe will alert continuously and diagnose nothing.",
+    "<b>Queue without latency is throughput, not a problem.</b> A busy device that still responds quickly is working correctly. Assess the two together.",
+    "<b>Disk queue is frequently a consequence, not a cause.</b> Memory paging appears here first. Rule out swap and low free space before investigating storage.",
+    "<b>A daily average conceals the episode</b> that generated the complaints."
+  ],
+  legend:["periodic","flathigh","hump","noisy"],
+  gates:[
+    {q:"Is memory paging or free space also a problem at the same time?", hint:"The most common misdiagnosis on this metric is treating a memory or free-space symptom as a storage one.", cont:"No — storage is the origin", exits:[
+      {b:"Yes", c:note("The disk is the affected party, not the cause","Addressing storage here treats a symptom. Resolve the memory pressure or reclaim free space and the queue will follow. Move to the memory swap or system free space metric.")}
+    ]},
+    {q:"Is latency also elevated?", hint:"On solid-state storage, queue depth alone carries very little information.", cont:"Yes — or the fleet uses mechanical disks", exits:[
+      {b:"No — deep queue with fast response", c:note("Weak signal","Deep parallel queues are how solid-state storage operates. Without latency and a measurable impact there is nothing to pursue here. The threshold should be set per storage tier rather than investigated.")}
+    ]},
+    {q:"Is free space on the system drive low?", hint:"A full drive degrades I/O well before it fails.", cont:"No — free space is adequate", exits:[
+      {b:"Yes", c:note("Free space is the likely origin","A near-full drive raises the queue and latency. Resolve free space first — see the system free space metric — and re-measure the queue before continuing.")}
+    ]}
+  ],
+  dims:[
+    {dim:"Storage technology (mechanical / SATA SSD / NVMe)", alias:"correlates with model, purchase date, and refresh cycle together", cards:[
+      hyp("Obsolete storage tier","The storage generation is behind the workload","flathigh",{mode:"improve",
+        confirms:"The affected rate falls to near zero on the newer tier in the same role; the queue is constant rather than event-driven.",
+        kills:"NVMe devices are affected at a similar rate.",
+        now:"No tactical action.",
+        structural:"Hardware refresh for the cohort. Boot and logon duration make this case more persuasively than queue depth; lead with those."})
+    ]},
+    {dim:"Disk model and firmware", alias:"sits within the model dimension; separate the two", cards:[
+      hyp("Firmware regression or defective batch","One revision, one date","step",{mode:"recover",
+        confirms:"The affected rate concentrates on one firmware revision; a same-model control group on another revision is unaffected; the onset matches the firmware rollout.",
+        kills:"The rate is even across revisions.",
+        now:"Hold the rollout.",
+        structural:"Firmware package correction and a vendor case with the cohort evidence. Add firmware to the build baseline so it is no longer invisible."})
+    ]},
+    {dim:"Application or agent version", alias:"the usual home of sync and security clients", cards:[
+      hyp("Sync or backup client activity","File synchronisation, backup, or a cache that has grown","hump",{mode:"recover",
+        confirms:"The consuming process is the sync or backup client; a working-hours shape; the onset tracks a client version or a scope change.",
+        kills:"An off-hours shape with a system process consuming.",
+        now:"Reduce scope — on-demand files, exclude large working folders, apply throttling.",
+        structural:"A synchronisation scope policy. A default of synchronising everything is a storage decision made by no one."}),
+      hyp("Security scan configuration","The same policy, schedule, and resulting load","periodic",{mode:"recover",
+        confirms:"A periodic shape aligned to a scan window; the consuming process is the security agent; the affected rate matches a policy group.",
+        kills:"Random peaks with a user-facing consumer.",
+        now:"Stagger and reschedule. An entire site scanning simultaneously is a self-inflicted load.",
+        structural:"Exclusion tuning with the security team, and scan intensity matched to storage capability."})
+    ]},
+    {dim:"Operating system build or image", alias:"correlates with the imaging wave and therefore location", cards:[
+      hyp("Image-level I/O load","Indexing, telemetry, and services introduced by the build","flathigh",{mode:"both",
+        confirms:"The affected rate separates by image generation; the baseline queue is elevated even at idle; the automatic-start service count is high.",
+        kills:"Images are affected evenly.",
+        now:"Disable services that have no owner.",
+        structural:"Build hygiene with an owner for each service. Every project adds one; none remove one."})
+    ]},
+    {dim:"Business unit or role", alias:"confirm it is not a location or an application-entitlement pattern", cards:[
+      hyp("Data-intensive workflow","Design, media, analytics, or large local datasets","hump",{mode:"both",
+        confirms:"The affected rate concentrates in one function; the consuming process is a line-of-business application; working hours only.",
+        kills:"Evenly distributed across functions.",
+        now:"Confirm with the group; this may be the work functioning normally.",
+        structural:"Provision storage for the role, or move the data off the endpoint."})
+    ]}
+  ],
+  randomRecover:[
+    hyp("Fleet-wide scan, backup, or sync policy change","One setting, every device","step",{
+      confirms:"A single onset date across all segments; a scan, backup, or sync policy changed then; no version or model split.",
+      kills:"Any segment is materially cleaner.",
+      now:"Identify the change on the onset date and reverse it for a pilot group.",
+      structural:"Experience review as part of policy change approval."}),
+    hyp("Enrolment, patch, or encryption wave","Expected and temporary, but worth stating explicitly","periodic",{
+      confirms:"Coincides with a known wave; the affected set is whoever is currently in it and moves as the wave progresses.",
+      kills:"Persists after the wave completes.",
+      now:"No action. Inform the service desk so occurrences are not escalated.",
+      structural:"Sequence waves by hardware capability and suppress the alert for their duration."})
+  ],
+  randomImprove:[
+    hyp("Storage tier baseline","The estate, not a cohort","flathigh",{
+      confirms:"Uniformly elevated; no clean segment; even the newest devices are only marginally better.",
+      kills:"A clean cohort exists.",
+      now:"No tactical action.",
+      structural:"The storage tier is the plan."}),
+    hyp("Overlapping scheduled activity","Multiple agents entitled to the disk at the same time","periodic",{
+      confirms:"The elevated queue is dominated by scheduled background work; several agents overlap in the same windows.",
+      kills:"One process dominates.",
+      now:"Map what runs when. The overlaps are usually evident once documented.",
+      structural:"A maintenance schedule the agents adhere to, matched to hardware capability."}),
+    hyp("Fleet-wide disk fullness","Nothing reclaims space, so drives fill and I/O degrades","creep",{
+      confirms:"Free space is trending down across the estate; no cleanup automation; the queue degrades with fullness.",
+      kills:"Free space is stable.",
+      now:"A one-off reclamation pass.",
+      structural:"Automated reclamation — see the system free space metric, which is the underlying cause here."})
+  ],
+  verify:"Queue depth and latency together, affected cohort against control, at native resolution. Scan and sync changes show on the next cycle; a storage tier change shows immediately and permanently.",
+  correlate:"Read alongside memory swap and system free space, both of which drive the disk queue upward. Confirm those are not the true origin before attributing the problem to storage itself."
+},
+
+{
+  id:"logon", name:"Logon speed", unit:"seconds",
+  what:"The time from credential entry to a usable desktop. Two distinct durations sit inside a single complaint: the logon itself, and the extended period while startup applications finish loading.",
+  qualify:[
+    "<b>Separate logon from extended logon first.</b> They have different owners — one is the operating system and directory path, the other is whatever the build placed in the startup sequence. Treating them as one wastes both teams' time.",
+    "<b>A slow boot is not a slow logon.</b> Users report a single figure. Do not adopt their framing.",
+    "<b>The first logon on a device builds the profile</b> and is always an outlier. Exclude it, or it will dominate the average.",
+    "<b>Normalise by device role.</b> A shared device logs on throughout the day; an assigned laptop logs on once. The counts are not comparable.",
+    "<b>Check system free space.</b> Low free space slows profile and temporary-file operations and is a frequent, overlooked cause of slow logon."
+  ],
+  legend:["flathigh","step","burst","creep"],
+  gates:[
+    {q:"Which phase is slow — the logon itself, or the extended logon?", hint:"Establish this before anything else; it routes to a different team.", cont:"The logon itself", exits:[
+      {b:"Extended logon only", c:hyp("Startup application load","The desktop appears, then remains unresponsive while startup items load","flathigh",{
+        confirms:"Logon duration is normal while extended logon is not; the gap tracks the number of startup entries; worst on devices with the most agents.",
+        kills:"Logon duration itself is elevated.",
+        now:"Delay or stagger startup items; few need to load first.",
+        structural:"An owner for every startup entry and an approval step for new ones. This list only grows."})}
+    ]},
+    {q:"Does the delay follow the user or the device?", hint:"The decisive test on this metric: the same user on another device, and the same device with another user.", cont:"Follows the device, the site, or nothing evident", exits:[
+      {b:"Follows the user", c:hyp("Profile or profile container","It travels with the user, so it is attached to the user","creep",{
+        confirms:"Slow wherever the user logs on; the profile or container size is well above the population; it grows month on month.",
+        kills:"The device is slow for every user.",
+        now:"Trim, redirect, or rebuild the profile.",
+        structural:"Folder redirection and a size limit. Without a limit, profiles grow indefinitely and the problem recurs annually."})}
+    ]},
+    {q:"Is it a peak at a fixed time of day?", hint:"This indicates concurrency rather than a device attribute.", cont:"No fixed-time peak", exits:[
+      {b:"Yes — at shift start", c:hyp("Concurrent logon load","Many users at one site authenticating within the same few minutes","burst",{
+        confirms:"Duration tracks the number of concurrent logons rather than any device attribute; a retry minutes later is fast; worst at the largest site.",
+        kills:"Slow logons are spread evenly through the day.",
+        now:"No device-side action. Set expectations with the service desk.",
+        structural:"Scale the authentication and profile infrastructure for peak rather than average load; stagger shift starts where the business permits."})}
+    ]}
+  ],
+  dims:[
+    {dim:"Site, subnet, or location", alias:"the strongest dimension here, but it correlates with the imaging wave — check build as well", cards:[
+      hyp("Directory, name resolution, or file path at that site","An infrastructure matter, not an endpoint one","flathigh",{mode:"both",
+        confirms:"The affected rate matches a site or subnet precisely, across every model and user; another site is unaffected; the delay is in policy and script processing rather than profile load.",
+        kills:"The affected devices are scattered across sites.",
+        now:"Refer to the directory and network teams with the site evidence. This is what turns an anecdote into an actionable item.",
+        structural:"Review site topology, controller placement, and referral configuration, typically last examined some offices ago."})
+    ]},
+    {dim:"Connection type (onsite / remote / tunnelled)", alias:"correlates with role — remote workers are seldom a random sample", cards:[
+      hyp("Logon path dependent on a tunnel","Everything logon requires is on the far side of a connection that is not yet established","flathigh",{mode:"both",
+        confirms:"An onsite control group is unaffected; the delay tracks tunnel establishment; worst on the first logon after a rebuild.",
+        kills:"Onsite devices are equally slow.",
+        now:"Confirm cached credentials and the pre-logon tunnel configuration.",
+        structural:"An identity model that does not require direct line of sight to a controller. This is a design decision, not a tuning exercise."})
+    ]},
+    {dim:"Agent version", alias:"a clean dimension, usually decisive when an onset exists", cards:[
+      hyp("An agent in the logon path","Security and connectivity agents hook logon, so their regression becomes a logon problem","step",{mode:"recover",
+        confirms:"The onset matches an agent rollout; the affected rate separates by agent version; a group held on the prior version is unaffected.",
+        kills:"All versions are affected equally.",
+        now:"Pin or roll back the version.",
+        structural:"Add logon duration to agent acceptance testing. This is the test that is seldom run and the regression that is regularly shipped."})
+    ]},
+    {dim:"Policy scope or organisational unit", alias:"correlates with business unit and often location", cards:[
+      hyp("Policy accumulation and synchronous scripts","Years of accumulated policy, drive mappings, and printer mappings","flathigh",{mode:"improve",
+        confirms:"The affected rate matches a policy scope; duration tracks the number of applied policies; a lightly-managed group is fast.",
+        kills:"Scopes with very different policy counts are equally slow.",
+        now:"Identify the slowest synchronous item and make it asynchronous. One item usually accounts for most of the delay.",
+        structural:"Consolidate policy and retire legacy mapping scripts. No one owns the cumulative cost, which is why it grew."})
+    ]},
+    {dim:"Storage technology", alias:"correlates with model and refresh cycle", cards:[
+      hyp("Storage-bound logon","Profile loading is an I/O workload before it is anything else","flathigh",{mode:"improve",
+        confirms:"The affected rate falls sharply on the newer storage tier within the same policy scope; the disk queue climbs during logon.",
+        kills:"The newer tier is equally slow — in which case the cause is policy or directory.",
+        now:"No tactical action.",
+        structural:"Hardware refresh for the cohort. Logon duration is the most persuasive figure available for this case."})
+    ]}
+  ],
+  randomRecover:[
+    hyp("Fleet-wide policy or directory change","One change, every logon","step",{
+      confirms:"A single onset date across every segment; a policy, script, mapping, or directory change landed then.",
+      kills:"Any segment is cleaner.",
+      now:"Identify the change and reverse it for a pilot scope.",
+      structural:"Experience metrics in change review. Logon is the first action every user takes and the last thing anyone tests."}),
+    hyp("Infrastructure change behind the logon path","Nothing changed on the endpoint, which is why no cohort appears","step",{
+      confirms:"A uniform onset with no device-side change; a controller, storage tier, or network path behind the logon changed.",
+      kills:"A device-side split exists.",
+      now:"Correlate the onset date with infrastructure change records rather than endpoint records.",
+      structural:"Include the logon path in infrastructure change impact assessment."})
+  ],
+  randomImprove:[
+    hyp("Profile design","Every profile is heavy, so none stands out","creep",{
+      confirms:"Uniformly slow with no cohort; profile sizes are large across the board; no redirection in place.",
+      kills:"A clean segment exists.",
+      now:"No tactical action at fleet scale.",
+      structural:"Folder redirection, a size limit, and a container strategy. This is design work rather than troubleshooting."}),
+    hyp("Startup portfolio","Everything ships enabled and nothing ships owned","flathigh",{
+      confirms:"Extended logon dominates; the startup entry count is high everywhere; no single dominant item.",
+      kills:"One item dominates.",
+      now:"Inventory the entries and identify owners; most have none.",
+      structural:"An approval step for new startup entries and a periodic review."})
+  ],
+  verify:"Logon and extended logon separately, affected cohort against control. Policy and startup changes show on the next logon; profile and infrastructure work takes a cycle to read reliably.",
+  correlate:"Read alongside system free space, which slows profile and temporary-file operations, and alongside disk queue during the logon window."
+},
+
+{
+  id:"boot", name:"Boot speed", unit:"seconds",
+  what:"The time from power-on to the logon screen. On Windows, this is the metric most likely to be measuring something other than its name suggests.",
+  qualify:[
+    "<b>Fast startup means most \u201cboots\u201d are resumes.</b> A device that has not performed a true full boot in weeks has a different problem, and its boot figures are unreliable.",
+    "<b>The boot after an update is legitimately long.</b> Exclude the update window, or this will be re-investigated every month.",
+    "<b>Boot ends where logon begins.</b> Keep the two separate, whatever the ticket states.",
+    "<b>Firmware and storage dominate boot time.</b> A cross-model average is arithmetic rather than information."
+  ],
+  legend:["step","flathigh","periodic","noisy"],
+  gates:[
+    {q:"Are these true full boots, or fast-startup resumes?", hint:"Compare against uptime. If the device rarely fully boots, the boot figures are not meaningful.", cont:"Yes — genuine full boots", exits:[
+      {b:"No — resumes, or inconsistent configuration", c:note("A measurement artefact","The comparison is between boots and resumes, and the difference is being read as a regression. Standardise the fast-startup configuration and establish a restart routine, then re-measure. A measurement problem should not be escalated as a performance one.")}
+    ]},
+    {q:"Does it occur only after updates?", hint:"", cont:"No — also away from the update cycle", exits:[
+      {b:"Only after updates", c:note("Expected behaviour","The first boot after an update is long by design and returns to baseline on the next boot. Suppress the alert for the update window. If the servicing ring itself is the issue, stagger it — but there is nothing to correct on the device.")}
+    ]}
+  ],
+  dims:[
+    {dim:"Model and firmware or driver revision", alias:"the primary dimension for boot, and it correlates with the refresh cycle", cards:[
+      hyp("Firmware or driver regression","One model, one revision, one date","step",{mode:"recover",
+        confirms:"The affected rate concentrates on one model and revision; the onset matches the rollout; a same-model group on the prior revision is unaffected.",
+        kills:"Distributed across models and revisions.",
+        now:"Hold the rollout; roll back on a pilot group.",
+        structural:"Add boot duration to driver and firmware validation. This is a routine regression that ships because it is not measured."})
+    ]},
+    {dim:"Storage technology", alias:"correlates with model and purchase date", cards:[
+      hyp("Storage-bound boot","Boot is a sequential read operation and little else","flathigh",{mode:"improve",
+        confirms:"The affected rate falls sharply on the newer tier for the same image; the queue climbs through boot; the difference is a multiple rather than a margin.",
+        kills:"The newer tier is equally slow.",
+        now:"No tactical action.",
+        structural:"Hardware refresh for the cohort. Boot and logon together form the strongest experience case for hardware investment."})
+    ]},
+    {dim:"Agent version", alias:"", cards:[
+      hyp("Boot-critical agents loading in sequence","Encryption, security, and management agents each requiring early start","step",{mode:"recover",
+        confirms:"The onset matches an agent rollout; the rate separates by version; the agent's own service start dominates the boot.",
+        kills:"All versions are affected equally.",
+        now:"Pin or roll back the version.",
+        structural:"Challenge the boot-start requirement. Several agents claim it without needing it, and the claim is rarely tested."})
+    ]},
+    {dim:"Operating system build or image generation", alias:"correlates with the imaging wave, and therefore location and refresh", cards:[
+      hyp("Service accumulation","Every project adds a service; none remove one","flathigh",{mode:"improve",
+        confirms:"The affected rate separates by image generation; the automatic-start service count is well above the control group; boot degrades with each image revision.",
+        kills:"Service counts are identical across affected and control.",
+        now:"Disable services that have no owner; most will have none.",
+        structural:"Boot duration as an image acceptance criterion, with a service inventory and an owner for each entry."})
+    ]}
+  ],
+  randomRecover:[
+    hyp("Fleet-wide driver, agent, or servicing deployment","A universal deployment produces a universal pattern","step",{
+      confirms:"A single onset date across every segment; no model, build, or version split; something was deployed to everyone that day.",
+      kills:"Any segment is materially cleaner.",
+      now:"Work from the onset date rather than device attributes. The absence of a cohort is the evidence, not an obstacle.",
+      structural:"Staged rings. A staged rollout confines the next occurrence to a cohort that can be caught early."}),
+    hyp("Fleet-wide policy enabling boot-time work","A setting rather than a package","step",{
+      confirms:"An onset with no version change; a policy enabled a boot-start service, an encryption requirement, or a network dependency at boot.",
+      kills:"Version differences are present.",
+      now:"Reverse the change for a pilot scope and compare.",
+      structural:"Experience review in change approval."})
+  ],
+  randomImprove:[
+    hyp("Image and service baseline","Every device carries the same load, so none stands out","flathigh",{
+      confirms:"Uniformly slow across models and storage tiers; a high service count everywhere; no clean segment.",
+      kills:"A clean cohort exists.",
+      now:"Inventory services and identify owners.",
+      structural:"Build hygiene as a continuing discipline, with boot duration as its measure."}),
+    hyp("No full-boot routine","The fleet rarely boots fully, so boot performance quietly degrades","creep",{
+      confirms:"Very high uptime across the estate; the rare true boots are slow; pending updates accumulate.",
+      kills:"Regular full boots that remain slow.",
+      now:"Prompt users to restart.",
+      structural:"A restart expectation. It improves this metric, memory, and update compliance at once, which makes it among the most cost-effective measures available."})
+  ],
+  verify:"True full boots only, affected cohort against control, held to a single model where possible. Firmware and agent changes show on the next boot; image and service work shows on the next image.",
+  correlate:"Read alongside storage technology and, where relevant, the boot-time behaviour of security and management agents."
+},
+
+{
+  id:"wifi", name:"Wi-Fi strength", unit:"RSSI dBm",
+  what:"The received signal strength, on a negative scale where a value closer to zero is stronger. On its own, this is among the weakest predictors of actual experience in the estate, and it should always be assessed together with noise, negotiated rate, and a measure of impact.",
+  qualify:[
+    "<b>Filter to devices genuinely using Wi-Fi.</b> A docked laptop reports a weak signal it is not using. This population noise is why many Wi-Fi dashboards appear alarming while meaning little.",
+    "<b>Signal strength alone predicts little.</b> A weaker signal on a clear channel outperforms a stronger one on a congested channel. Assess it with noise, negotiated rate, and impact.",
+    "<b>Onsite versus remote determines ownership.</b> Home Wi-Fi is genuinely the user's experience and genuinely not corporate infrastructure. Both facts are relevant.",
+    "<b>Platforms report noise differently.</b> A single threshold across all platforms is a mistake."
+  ],
+  legend:["flatlow","dip","noisy","hump"],
+  gates:[
+    {q:"Is there a measurable impact?", hint:"Round-trip time, packet loss, failed connections, or call quality.", cont:"Yes — impact is confirmed", exits:[
+      {b:"No — weak signal, everything else normal", c:note("Not an incident","A weak signal that no one is experiencing. The threshold is the problem: signal strength alone will always over-report. Reset it to fire on impact, and spend the effort on a metric users can feel.")}
+    ]},
+    {q:"Onsite or remote?", hint:"This determines who owns the outcome.", cont:"Onsite — corporate infrastructure", exits:[
+      {b:"Remote or home", c:hyp("Home network","A genuine experience issue, but not corporate equipment — and still worth addressing","dip",{
+        confirms:"Affected only when remote; the same devices are unaffected onsite; typically distance, an older router, or a congested band.",
+        kills:"Also poor onsite — in which case the cause is the device or the site.",
+        now:"Provide practical guidance to the affected group on router position, band, and age. Do not dispatch an engineer to a private residence.",
+        structural:"Decide this as policy once — guidance, a stipend, or supplied equipment for roles that require it. Otherwise it recurs as tickets indefinitely."})}
+    ]}
+  ],
+  dims:[
+    {dim:"Location — site, building, floor, access point", alias:"the primary dimension here; confirm it is not an adapter-generation pattern in disguise", cards:[
+      hyp("Coverage or capacity","Not an endpoint issue, and no endpoint action will resolve it","flatlow",{mode:"both",
+        confirms:"The affected rate matches a location, floor, or access point across every model and user; another floor is unaffected; the signal is weak rather than noisy.",
+        kills:"Scattered across locations.",
+        now:"Refer to the network team with the location and device evidence attached.",
+        structural:"Survey and remediate coverage. Access point density for actual occupancy rather than the original floor plan."}),
+      hyp("Interference or contention","Adequate signal, unusable connection","noisy",{mode:"both",
+        confirms:"Acceptable signal strength with a poor signal-to-noise ratio and a low negotiated rate; worst at peak occupancy; usually the lower band.",
+        kills:"A clear channel with a healthy negotiated rate.",
+        now:"Escalate the channel plan with the evidence.",
+        structural:"Channel planning and band steering. Adding access points to an interference problem worsens it, which is the common error."})
+    ]},
+    {dim:"Model, adapter, and driver revision", alias:"", cards:[
+      hyp("Driver or adapter regression","One model, one revision, one date","step",{mode:"recover",
+        confirms:"The affected rate concentrates on one adapter and driver revision; the onset matches the rollout; the same model on the prior driver is unaffected at the same access point.",
+        kills:"Distributed across adapters.",
+        now:"Hold the rollout; roll back on a pilot group.",
+        structural:"Add connectivity to driver validation. Wi-Fi drivers regress routinely and are tested rarely."})
+    ]},
+    {dim:"Adapter generation", alias:"correlates with the refresh cycle and model", cards:[
+      hyp("Legacy radio","The network was upgraded and the fleet was not","flatlow",{mode:"improve",
+        confirms:"The affected devices are older radios in locations where current hardware is unaffected; the gap is largest where the network is newest.",
+        kills:"Current radios are affected at the same rate.",
+        now:"No tactical action.",
+        structural:"Hardware refresh for the cohort, framed against the network investment already made. This is the most straightforward version of the argument."})
+    ]},
+    {dim:"Business unit or role", alias:"frequently a location pattern", cards:[
+      hyp("Mobility pattern","Users who move, on a network designed for stationary use","dip",{mode:"both",
+        confirms:"The affected rate concentrates in a mobile function; drops occur in motion rather than at rest; the same devices are unaffected when stationary.",
+        kills:"The affected users are desk-based.",
+        now:"Review roaming behaviour on their devices; confirm the working pattern with the group.",
+        structural:"Roaming design and coverage overlap along the actual movement paths."})
+    ]}
+  ],
+  randomRecover:[
+    hyp("Fleet-wide driver or power policy change","Every device, so no cohort appears","step",{
+      confirms:"A single onset across all segments and locations; a driver or a power-management policy was deployed that day.",
+      kills:"Any segment is cleaner.",
+      now:"Work from the onset date. Radio power management is a frequent and quiet cause — it is enabled by default and reduces experience without being visible.",
+      structural:"A power policy that treats the radio as essential; staged rings for driver rollout."}),
+    hyp("Network-side change","Nothing changed on the endpoint, which is precisely the signature","step",{
+      confirms:"A uniform onset with no device-side change; controller firmware, the channel plan, or authentication changed then.",
+      kills:"A device-side split exists.",
+      now:"Correlate the onset with network change records rather than endpoint records. The absence of an endpoint cohort is the finding.",
+      structural:"Endpoint experience data in the network change review; the two teams often meet for the first time during the incident."})
+  ],
+  randomImprove:[
+    hyp("Radio baseline","The fleet is behind the network","flatlow",{
+      confirms:"Uniformly weak negotiated rates; no clean location; current-generation devices measurably better but too few to move the average.",
+      kills:"A clean cohort exists.",
+      now:"No tactical action.",
+      structural:"Align the hardware refresh to the network generation. Investing in one without the other is a common and costly mismatch."}),
+    hyp("Power-saving defaults","Operating as designed, and the design costs experience","dip",{
+      confirms:"Drops correlate with idle-then-resume rather than with location; aggressive power management is set fleet-wide.",
+      kills:"Drops occur under continuous load.",
+      now:"Test an adjusted power plan on a pilot group.",
+      structural:"A deliberate power policy. This measure is free and is usually never revisited after the image was built."})
+  ],
+  verify:"Signal, noise, and negotiated rate together, with one impact measure, affected cohort against control. Driver and policy changes show within a day; coverage work shows only after the survey is complete.",
+  correlate:"Read alongside noise level, negotiated rate, and connection success — signal strength interpreted alone is misleading."
+}
+];
+
+/* ---------- natural-language queries ----------
+   One structured, natural-language prompt per decision node, for the platform's
+   natural-language query capability. Each specifies a timeframe, a per-segment
+   breakdown rather than a global value, explicit thresholds, and the data to
+   analyse. Matched to gates and dimensions by array order.
+   Thresholds shown are example values and should be tuned to the estate.        */
+const NLQ = {
+  swaprate:{
+    disclaimer:"Over the past 30 days, compare the weekly average memory swap rate between two groups: devices that were already reporting 30 days ago (a fixed population), and all devices reporting today. If the fixed population is stable while the full population dropped, the change is caused by device onboarding rather than degradation. Also list any change to the memory swap rate threshold or to the score definition during this period.",
+    gates:[
+      "Over the past 7 days, for devices whose average memory swap rate exceeds 1 MB/s, show average used memory as a percentage of installed memory per device, at 15-minute resolution, ordered by highest ratio. Flag devices where the ratio stays below 85% despite high paging."
+    ],
+    dims:[
+      "Over the past 7 days, break down by hardware model and installed memory size: the number of devices with average memory swap rate above 1 MB/s and used memory above 85% of installed memory, and the total number of devices in each group. Show the affected percentage per group so it can be compared against the fleet average.",
+      "Over the past 14 days, for devices with average memory swap rate above 1 MB/s, show the average memory consumption of each application per binary version, and the number of affected devices per version. Highlight versions where memory grows over the session and resets on restart.",
+      "Over the past 14 days, show the percentage of devices with average memory swap rate above 1 MB/s broken down by operating system name and build, with the total device count per build, and mark the date each build's paging increased.",
+      "Over the past 7 days, show the percentage of devices with average memory swap rate above 1 MB/s broken down by entity or department, with the total device count per group, ordered by highest affected rate."
+    ],
+    random:"Over the past 30 days, show the daily average memory swap rate across all devices to identify the onset date of the increase. Then list all applications, agents, and policies deployed fleet-wide on or shortly before that date.",
+    verify:"Over the past 7 days at 15-minute resolution, compare the average memory swap rate of the affected cohort against a control group of the same hardware model and role, and confirm the affected cohort converges toward the control group after the fix."
+  },
+  swapsize:{
+    disclaimer:"Over the past 30 days, compare the weekly average memory swap size between a fixed population of devices reporting 30 days ago and all devices reporting today, to distinguish onboarding from degradation. Also list any change to the swap size threshold or to the score definition during this period.",
+    gates:[
+      "Over the past 14 days, for devices with elevated memory swap size, show the trend of average swap size per device at daily resolution. Separate devices where swap size is stable near a high value from those where it grows steadily and resets on restart."
+    ],
+    dims:[
+      "Over the past 14 days, for devices with growing memory swap size, show average swap size per application binary version, and the count of affected devices per version, highlighting versions where size climbs steadily without resetting.",
+      "Over the past 7 days, break down by hardware model and installed memory: the number of devices with memory swap size above 5 GB under normal load, and the total device count per group. Show the affected percentage per group.",
+      "Over the past 7 days, show the percentage of devices with memory swap size above 5 GB broken down by entity, with the total device count per group."
+    ],
+    random:"Over the past 30 days, show the daily average memory swap size across all devices to find the onset date, then list applications and platform updates deployed fleet-wide around that date.",
+    verify:"Over the past 14 days at daily resolution, compare the memory swap size trend of the affected cohort against a control group of the same model and role, and confirm the growth curve flattens after the fix."
+  },
+  cpuint:{
+    disclaimer:"Over the past 30 days, compare the weekly average CPU interrupt time between a fixed population of devices reporting 30 days ago and all devices reporting today, to rule out onboarding. Note any large operating system or driver migration in the period, and any change to the interrupt threshold or score definition.",
+    gates:[
+      "Over the past 7 days, for devices with average CPU interrupt time above 10%, show both interrupt time and total CPU usage per device at 15-minute resolution. Flag devices where interrupt time is high while total CPU usage remains moderate."
+    ],
+    dims:[
+      "Over the past 14 days, break down by device model and network or storage driver version: the percentage of devices with average CPU interrupt time above 10%, with the total device count per group, and mark the deployment date of each driver version.",
+      "Over the past 7 days, for devices with high CPU interrupt time, group by connected dock or peripheral model and show the affected rate per group, to see whether the pattern follows a peripheral rather than the device model.",
+      "Over the past 14 days, show the percentage of devices with CPU interrupt time above 10% broken down by BIOS or firmware version, with the total device count per group and the firmware rollout date.",
+      "Over the past 7 days, show the affected rate of high CPU interrupt time broken down by entity or role, with device counts, to detect role-specific hardware."
+    ],
+    random:"Over the past 30 days, show the daily average CPU interrupt time across all devices to find the onset date, then list drivers, firmware, and security agents deployed fleet-wide on that date.",
+    verify:"Over the past 7 days at 15-minute resolution, compare CPU interrupt time of the affected cohort against a same-model control group on the previous driver revision, and confirm convergence after the rollback."
+  },
+  freespace:{
+    disclaimer:"Over the past 30 days, compare the weekly average system-drive free space between a fixed population of devices reporting 30 days ago and all devices reporting today, to separate onboarding from a genuine decline. Note any image change and any change to the free-space threshold or score definition.",
+    gates:[
+      "Over the past 30 days, show the trend of system-drive free space in GB per device at daily resolution. Separate devices where free space is stable near its limit from those filling steadily toward zero."
+    ],
+    dims:[
+      "Over the past 30 days, for devices with system-drive free space below 10 GB, identify which application, log, cache, or update directory is consuming the space, broken down by application version, and the onset date of the growth.",
+      "Over the past 7 days, break down by hardware model and system-drive capacity: the percentage of devices with free space below 10 GB or below 10% of capacity, with the total device count per group. Show the affected percentage per group.",
+      "Over the past 30 days, show the percentage of devices with free space below 10 GB broken down by operating system build or image generation, with device counts and the date free space dropped for each build.",
+      "Over the past 7 days, show the affected rate of low free space (below 10 GB) broken down by entity, with device counts, to detect role-based local data accumulation."
+    ],
+    random:"Over the past 30 days, show the daily average system-drive free space across all devices to find the onset date of the decline, then list updates, agents, or retention changes deployed fleet-wide around that date.",
+    verify:"Over the past 14 days at daily resolution, compare the free space of the affected cohort against a control group after cleanup, and re-measure the original symptom (memory paging, logon duration, or application crashes) on the same devices to confirm it resolved."
+  },
+  disk:{
+    disclaimer:"Over the past 30 days, compare the weekly average disk queue length between a fixed population of devices reporting 30 days ago and all devices reporting today, to rule out onboarding. Note any storage-tier refresh, scan-policy change, or change to the queue threshold or score definition.",
+    gates:[
+      "Over the past 7 days, for devices with sustained disk queue length at or above 1, show at the same 15-minute intervals the memory swap rate and the system-drive free space per device, to determine whether storage is the origin, or the victim of memory paging or a full drive.",
+      "Over the past 7 days, for devices with disk queue length at or above 1, show the average disk latency per device and the storage type (mechanical, SATA SSD, or NVMe). Flag devices with a deep queue but low latency as false positives.",
+      "Over the past 7 days, for devices with elevated disk queue, show system-drive free space per device and flag those below 10 GB, where fullness is the likely origin."
+    ],
+    dims:[
+      "Over the past 7 days, break down by storage technology (mechanical, SATA SSD, NVMe): the percentage of devices with sustained disk queue at or above 1 and elevated latency, with the total device count per group.",
+      "Over the past 14 days, show the affected rate of high disk queue broken down by disk model and firmware revision, with device counts and firmware rollout dates.",
+      "Over the past 7 days, for devices with high disk queue during working hours, show the consuming process and group by sync or security agent version, with the onset date per version.",
+      "Over the past 7 days, break down by operating system build or image generation: the idle disk queue length and the automatic-start service count per device, with device counts per build.",
+      "Over the past 7 days, show the affected rate of high disk queue during working hours broken down by entity, with device counts, to detect data-intensive roles."
+    ],
+    random:"Over the past 30 days, show the daily average disk queue across all devices to find the onset date, then list scan, backup, or sync policy changes, and any enrolment or encryption wave active on that date.",
+    verify:"Over the past 7 days at 15-minute resolution, compare disk queue and latency of the affected cohort against a control group, and confirm convergence after the fix."
+  },
+  logon:{
+    disclaimer:"Over the past 30 days, compare the weekly average logon duration between a fixed population of devices reporting 30 days ago and all devices reporting today, to separate onboarding from degradation. Note any operating system migration (for example to Windows 11), policy change, or change to the logon threshold or score definition; a migrated cohort may have a different baseline by design.",
+    gates:[
+      "Over the past 7 days, for devices with slow logon, show logon duration and extended logon duration separately per device, ordered by the larger contributor, excluding first logons that build the profile.",
+      "Over the past 14 days, for the affected users, compare their logon duration across the different devices they use, and compare the logon duration of their main devices across different users, to determine whether the delay follows the user or the device.",
+      "Over the past 7 days, show average logon duration by hour of day and by site, to detect peaks at shift start that correlate with concurrent logon volume."
+    ],
+    dims:[
+      "Over the past 7 days, break down by site and subnet: average logon duration and the affected device count, across all models and users, to isolate a location-specific infrastructure cause.",
+      "Over the past 7 days, compare average logon duration between onsite, remote, and VPN-connected sessions, broken down by device, focusing on the first logon after a rebuild.",
+      "Over the past 14 days, show average logon duration broken down by security or VPN agent version, with device counts and the agent rollout date.",
+      "Over the past 7 days, break down average logon duration by organizational unit or policy scope, alongside the number of applied policies per scope, with device counts.",
+      "Over the past 7 days, within the same policy scope, compare average logon duration by storage technology, and show disk queue during the logon window."
+    ],
+    random:"Over the past 30 days, show the daily average logon duration across all devices to find the onset date, then list fleet-wide policy, script, mapping, or directory changes, and any infrastructure change on that date.",
+    verify:"Over the past 7 days, compare logon and extended logon duration separately for the affected cohort against a control group, and confirm convergence after the fix."
+  },
+  boot:{
+    disclaimer:"Over the past 30 days, compare the weekly average boot duration between a fixed population of devices reporting 30 days ago and all devices reporting today, excluding post-update boots, to rule out onboarding. Note any firmware or image migration, and any change to the boot threshold or score definition.",
+    gates:[
+      "Over the past 14 days, per device, show the number of true full boots versus fast-startup resumes, and the days since the last full boot, to confirm the measured events are genuine boots.",
+      "Over the past 30 days, show average boot duration by day across all devices and overlay the update deployment dates, to see whether slow boots occur only within the update window."
+    ],
+    dims:[
+      "Over the past 14 days, break down by device model and firmware or driver revision: average full-boot duration and affected device count, with the rollout date per revision.",
+      "Over the past 7 days, for the same image, compare average full-boot duration by storage technology, and show disk queue during boot.",
+      "Over the past 14 days, show average full-boot duration broken down by security, encryption, or management agent version, with device counts and rollout dates.",
+      "Over the past 14 days, break down by operating system build or image generation: average full-boot duration and the automatic-start service count per device, with device counts."
+    ],
+    random:"Over the past 30 days, show the daily average full-boot duration across all devices to find the onset date, then list fleet-wide driver, agent, or servicing deployments on that date.",
+    verify:"Over the past 14 days, for true full boots only, compare boot duration of the affected cohort against a same-model control group, and confirm convergence after the fix."
+  },
+  wifi:{
+    disclaimer:"Over the past 30 days, for Wi-Fi-connected sessions only, compare the weekly average Wi-Fi signal strength and connection quality between a fixed population of devices reporting 30 days ago and all devices reporting today, to rule out onboarding. Note any driver rollout or network-side change, and any change to the signal threshold or score definition.",
+    gates:[
+      "Over the past 7 days, for devices with average Wi-Fi signal strength at or below -67 dBm while on Wi-Fi, show round-trip time, packet loss, failed connections, and call quality per device, to confirm whether the weak signal has measurable impact.",
+      "Over the past 7 days, for impacted Wi-Fi devices, compare signal strength and connection quality between onsite and remote sessions per device, to determine whether the issue is corporate infrastructure or the home network."
+    ],
+    dims:[
+      "Over the past 7 days, for onsite Wi-Fi sessions, break down by site, building, floor, and access point: the affected rate of poor signal or low signal-to-noise ratio, with device counts, across all models and users.",
+      "Over the past 14 days, show the affected rate of poor Wi-Fi signal or low negotiated rate broken down by device model, adapter, and driver revision, with device counts and the driver rollout date, at the same access points.",
+      "Over the past 7 days, break down by Wi-Fi adapter generation: the affected rate of low negotiated rate in locations served by current access points, with device counts.",
+      "Over the past 7 days, show the affected rate of Wi-Fi drops broken down by entity or role, distinguishing sessions in motion from stationary sessions, to detect mobility patterns."
+    ],
+    random:"Over the past 30 days, show the daily average Wi-Fi signal quality across all devices to find the onset date, then list fleet-wide driver or power-policy deployments, and any network-side change (controller firmware, channel plan, or authentication) on that date.",
+    verify:"Over the past 7 days, compare signal strength, noise, negotiated rate, and one impact measure for the affected cohort against a control group, and confirm convergence after the fix."
+  }
+};
+
+let nlqSeq = 0;
+function nlqHTML(text, label){
+  if(!text) return "";
+  const id = "nlq-" + (nlqSeq++);
+  const safe = text.replace(/"/g,"&quot;");
+  return `<div class="nlq">
+    <div class="nlqh"><span class="lbl">${label||"NATURAL-LANGUAGE QUERY"}</span>
+      <button type="button" class="cpy" data-copy="${id}">Copy</button></div>
+    <p class="qtext" id="${id}">${text}</p>
+  </div>`;
+}
+
+/* ---------- render ---------- */
+function cardHTML(c){
+  if(c.kind === "note") return `<div class="card note" data-mode="${c.mode}"><div class="ct">${c.title}</div><p>${c.body}</p></div>`;
+  const row = (t,v,cls="") => v ? `<dt class="${cls}">${t}</dt><dd>${v}</dd>` : "";
+  return `<div class="card hyp" data-mode="${c.mode}">
+    <div class="ctop">
+      <div><div class="ct">${c.title}</div><div class="cs">${c.sub}</div></div>${trace(c.shape)}
+    </div>
+    <dl>${row("Confirms",c.confirms)}${row("Excludes if",c.kills)}${row("Immediate fix",c.now,"act")}${row("Long-term fix",c.structural,"act")}${row("Note",c.watch)}</dl>
+  </div>`;
+}
+
+function panelHTML(t){
+  const q = NLQ[t.id] || {};
+  const legend = t.legend.map(k=>`<div class="lg">${trace(k)}<span>${SHAPES[k].t}</span></div>`).join("");
+
+  const gates = t.gates.map((g,i)=>`
+    <div class="node"><div class="n">QUALIFY ${i+1}</div><div class="q">${g.q}</div>${g.hint?`<div class="hint">${g.hint}</div>`:""}
+      ${nlqHTML((q.gates||[])[i], "EXAMPLE — QUERY TO ANSWER THIS")}</div>
+    <div class="exits">${g.exits.map(e=>`<div class="exit"><div class="branch">${e.b}</div>${cardHTML(e.c)}</div>`).join("")}</div>
+    <div class="cont">${g.cont}</div>`).join("");
+
+  const dims = t.dims.map((d,i)=>`
+    <div class="dim">
+      <div class="dimh">${d.dim}${d.alias?` <span class="al">· ${d.alias}</span>`:""}</div>
+      <div class="stack">${d.cards.map(cardHTML).join("")}</div>
+      ${nlqHTML((q.dims||[])[i], "EXAMPLE — QUERY FOR THIS SEGMENT")}
+    </div>`).join("");
+
+  const structure = `
+    <div class="node"><div class="n">STRUCTURE</div><div class="q">Do the affected devices share an attribute, or are they distributed at random?</div>
+      <div class="hint">At fleet scale a large number of affected devices is expected. The question is not how many, but whether they have anything in common.</div>
+    </div>
+    <div class="exits">
+
+      <div class="bblock">
+        <h4 class="disp">Pattern — the affected set is concentrated</h4>
+        <div class="in">
+          <div class="caution">
+            <b>TWO COMMON ERRORS</b>
+            <p><b>Counts mislead.</b> The largest segment will contain the most affected devices regardless of cause. Compare the affected rate within a segment against the fleet rate. Without a rate difference, there is no finding.</p>
+            <p><b>Dimensions correlate.</b> Location correlates with the imaging wave, which correlates with model, which correlates with build. A location pattern is often in fact an imaging wave. The finding is the dimension that remains once the correlated dimensions are held constant.</p>
+          </div>
+          ${dims}
+        </div>
+      </div>
+
+      <div class="bblock" data-branch="random">
+        <h4 class="disp">Random — no shared attribute</h4>
+        <div class="in">
+          <div class="caution">
+            <b>THIS IS A FINDING, NOT A DEAD END</b>
+            <p data-mode="recover">No cohort means the cause is universal. Every device attribute is constant, so the remaining variable is time. The question becomes what was deployed to the whole fleet, and on which date.</p>
+            <p data-mode="improve">No cohort means the estate is built this way. Nothing changed, so nothing can be recovered. These are baseline and design questions that require a plan rather than an investigation.</p>
+          </div>
+          <div class="stack" data-mode="recover">${t.randomRecover.map(cardHTML).join("")}</div>
+          <div data-mode="recover">${nlqHTML(q.random, "EXAMPLE — QUERY TO FIND THE ONSET DATE")}</div>
+          <div class="stack" data-mode="improve">${t.randomImprove.map(cardHTML).join("")}</div>
+        </div>
+      </div>
+
+    </div>`;
+
+  const hub = t.hub ? `
+    <div class="hub">
+      <b class="mono">THIS METRIC IS OFTEN THE ROOT CAUSE OF OTHER SYMPTOMS</b>
+      <p>${t.hub.lead}</p>
+      <ul>${t.hub.items.map(i=>`<li>${i}</li>`).join("")}</ul>
+      <p class="close">${t.hub.close}</p>
+    </div>` : "";
+
+  const correlate = t.correlate ? `<p><b>RELATED METRICS</b>${t.correlate}</p>` : "";
+
+  return `<section class="panel" id="p-${t.id}" role="tabpanel" aria-labelledby="t-${t.id}" tabindex="0" data-mode="recover">
+    <div class="mhead"><h2 class="disp">${t.name}</h2><p class="what">${t.what}</p></div>
+    <div class="qualify"><b class="mono">QUALIFY THE SIGNAL BEFORE ACTING ON IT</b><ul>${t.qualify.map(q=>`<li>${q}</li>`).join("")}</ul></div>
+    ${hub}
+    <div class="mode" role="group" aria-label="Mode">
+      <button type="button" data-set="recover" aria-pressed="true">Recover</button>
+      <button type="button" data-set="improve" aria-pressed="false">Improve</button>
+    </div>
+    <p class="modenote" data-note="recover">RECOVER — the metric was acceptable and has degraded. Something changed; the task is to identify the change.</p>
+    <p class="modenote" data-note="improve">IMPROVE — the metric was never acceptable. Nothing changed, so there is nothing to identify. The task is to decide what to build differently.</p>
+    <div class="predisc" data-note="recover">
+      <b class="mono">FIRST, CONFIRM THE ENVIRONMENT HAS NOT CHANGED</b>
+      <p>Before investigating any device, rule out a change to the measurement or the population. Each of the following can move the metric without any device degrading, and each is resolved differently from a genuine regression:</p>
+      <ul>
+        <li><b>Threshold or scoring change.</b> A change to the metric's threshold or to how the score is calculated shifts the result while device behaviour is unchanged. Confirm the definition is the same across the period.</li>
+        <li><b>Population change.</b> Newly onboarded devices, a new site, or an acquisition alter the fleet average without affecting any existing device. Compare a fixed set of devices present across the whole period against the full population; if the fixed set is stable, the cause is the population, not a degradation.</li>
+        <li><b>Large-scale platform change.</b> An operating system migration — for example a move to Windows 11 — or a major image change introduces a different baseline. The metric may have shifted for the migrated cohort by design rather than by fault.</li>
+        <li><b>Coverage change.</b> A wider agent rollout or a newly collected metric changes which devices report, which can move the average independently of experience.</li>
+      </ul>
+      <p class="close">If any of these accounts for the change, this is not a recovery case: the environment moved, no device degraded, and the correct response is to re-baseline rather than to investigate. Proceed only once these are excluded.</p>
+    </div>
+    <div class="legend">${legend}</div>
+    <div class="flow">${gates}${structure}</div>
+    <div class="verify">
+      <h3 class="disp">Verify — measure the metric, not the score</h3>
+      <div class="in">
+        <p><b>WHAT TO RE-MEASURE</b>${t.verify}</p>
+        ${nlqHTML(q.verify, "EXAMPLE — QUERY TO VERIFY THE FIX")}
+        <p><b>WHY NOT THE SCORE</b>A rolling window requires a full period before it reflects a change, so checking it early is uninformative and can suggest the correction failed when it did not. Measure the metric directly; the score will follow on its own schedule.</p>
+        <p><b>THE DECISIVE TEST</b>The affected cohort should converge on the control group. If it does not, the correction addressed a correlation rather than the cause; return to the dimension that survived and re-examine it.</p>
+        ${correlate}
+      </div>
+    </div>
+  </section>`;
+}
+
+const rail = document.querySelector(".rail"), panels = document.getElementById("panels");
+TREES.forEach((t,i)=>{
+  const b = document.createElement("button");
+  b.className="tab"; b.id="t-"+t.id; b.type="button";
+  b.setAttribute("role","tab"); b.setAttribute("aria-controls","p-"+t.id);
+  b.setAttribute("aria-selected", i===0?"true":"false");
+  b.innerHTML = `<span class="nm">${t.name}</span><span class="un">${t.unit}</span>`;
+  b.addEventListener("click", ()=>select(t.id));
+  rail.appendChild(b);
+  panels.insertAdjacentHTML("beforeend", panelHTML(t));
+});
+
+function applyMode(panel){
+  const m = panel.dataset.mode;
+  panel.querySelectorAll("[data-mode]").forEach(el=>{
+    if(el === panel) return;
+    const v = el.dataset.mode;
+    el.hidden = !(v === "both" || v === m);
+  });
+  panel.querySelectorAll("[data-note]").forEach(el=> el.hidden = el.dataset.note !== m);
+  panel.querySelectorAll(".mode button").forEach(b=> b.setAttribute("aria-pressed", b.dataset.set===m ? "true":"false"));
+  panel.querySelectorAll(".dim").forEach(d=>{
+    d.hidden = ![...d.querySelectorAll(".card")].some(c=>!c.hidden);
+  });
+}
+panels.querySelectorAll(".panel").forEach(p=>{
+  p.querySelectorAll(".mode button").forEach(b=>
+    b.addEventListener("click", ()=>{ p.dataset.mode = b.dataset.set; applyMode(p); }));
+  applyMode(p);
+});
+
+function select(id){
+  TREES.forEach(t=>{
+    const sel = t.id===id;
+    document.getElementById("t-"+t.id).setAttribute("aria-selected", sel?"true":"false");
+    document.getElementById("p-"+t.id).hidden = !sel;
+  });
+}
+select(TREES[0].id);
+
+document.addEventListener("click", e=>{
+  const btn = e.target.closest(".cpy");
+  if(!btn) return;
+  const el = document.getElementById(btn.dataset.copy);
+  if(!el) return;
+  const text = el.textContent;
+  const done = ()=>{ btn.textContent="Copied"; btn.classList.add("done"); setTimeout(()=>{ btn.textContent="Copy"; btn.classList.remove("done"); }, 1400); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(()=>fallback(text, done));
+  } else { fallback(text, done); }
+});
+function fallback(text, done){
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position="fixed"; ta.style.opacity="0";
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand("copy"); done(); }catch(_){}
+  document.body.removeChild(ta);
+}
+
+rail.addEventListener("keydown", e=>{
+  const k = {ArrowDown:1,ArrowRight:1,ArrowUp:-1,ArrowLeft:-1};
+  if(!(e.key in k)) return;
+  e.preventDefault();
+  const tabs=[...rail.querySelectorAll(".tab")];
+  const i=tabs.findIndex(t=>t.getAttribute("aria-selected")==="true");
+  const n=(i+k[e.key]+tabs.length)%tabs.length;
+  tabs[n].focus(); select(TREES[n].id);
+});
+</script>
+</body>
+</html>
