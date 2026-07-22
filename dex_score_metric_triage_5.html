@@ -843,6 +843,125 @@ const TREES = [
   ],
   verify:"Signal, noise, and negotiated rate together, with one impact measure, affected cohort against control. Driver and policy changes show within a day; coverage work shows only after the survey is complete.",
   correlate:"Read alongside noise level, negotiated rate, and connection success — signal strength interpreted alone is misleading."
+},
+
+{
+  id:"freezes", name:"Software freezes (GUI)", unit:"events per hour of use",
+  what:"A freeze is recorded when an application with a user interface stops processing window messages and the operating system marks it as not responding, typically after five seconds. Because detection depends on a window and a message loop, this metric covers user-facing software only. The underlying fault is rarely that the application has failed: in almost all cases the interface thread is blocked waiting for something slow — file access, a network path, a lock, an add-in, or the graphics layer — while the rest of the process remains healthy.",
+  hub:{
+    label:"THIS METRIC COVERS SOFTWARE WITH A USER INTERFACE ONLY",
+    lead:"A freeze is detected through the window message loop, so this analysis applies to applications the user works in directly. Software without an interface fails in a different way and is not covered here:",
+    items:[
+      "<b>Software with an interface.</b> Office applications, browsers, collaboration clients, and line-of-business applications. The freeze is immediately visible, interrupts work, and generates a ticket. The cause is normally the interface thread waiting on a slow operation.",
+      "<b>Software without an interface.</b> Services, agents, scheduled tasks, and background synchronisation. These have no window to mark as not responding; they hang, time out, or fail silently, and are detected through service timeouts and health checks rather than through this metric.",
+      "<b>The causes differ.</b> Interface freezes are dominated by synchronous work on the interface thread — file and network access, add-ins, and rendering. Background hangs are dominated by dependency timeouts, deadlocks, and resource exhaustion.",
+      "<b>The remediation differs.</b> An interface freeze is addressed through add-in management, file and network path configuration, graphics drivers, or the application version. A background hang is addressed through service dependencies, timeout values, and restart policy."
+    ],
+    close:"If the reported problem concerns a background service or agent rather than an application the user was working in, this analysis does not apply."
+  },
+  qualify:[
+    "<b>Compare freezes against usage, not against each other.</b> The most heavily used application will always record the most freeze events. Measure freezes per hour of active use; without this normalisation the ranking reflects how popular an application is rather than how well it performs.",
+    "<b>A freeze is not a crash.</b> A freeze recovers; a crash ends the session. Users report both as the application stopping. Confirm which event is being counted, and whether the application recovered or was terminated.",
+    "<b>Duration determines impact.</b> A brief pause during a heavy operation is expected; a freeze lasting a minute is an incident. Assess the distribution of freeze durations rather than the event count alone.",
+    "<b>Some operations block the interface by design.</b> Large recalculations, rendering, and bulk imports occupy the interface thread legitimately. Confirm the application is not simply performing the work it was asked to do.",
+    "<b>On virtual or remote sessions, establish what actually froze.</b> A stalled remoting protocol is reported by users as a frozen application even when the application itself is responsive."
+  ],
+  legend:["step","hump","noisy","flathigh"],
+  gates:[
+    {q:"Is the freeze rate high relative to how much the application is used?", hint:"The most-used application always records the most freezes. Compare the rate per hour of active use, not the event count.", cont:"Yes — the rate remains elevated after normalisation", exits:[
+      {b:"No — high count, normal rate", c:note("Usage volume, not application quality","The application records many freeze events because it is in use for most of the working day. Once normalised against active use, its rate is comparable to the rest of the estate. Rank applications by rate per hour of use and investigate those that are genuinely above the norm.")}
+    ]},
+    {q:"Do the freezes coincide with resource pressure on the device?", hint:"Freezes are frequently a symptom of memory paging, storage saturation, or a full system drive rather than a fault in the application.", cont:"No — resources are adequate at the time of the freezes", exits:[
+      {b:"Yes", c:note("The application is the affected party, not the cause","When the interface thread is waiting on memory paging, a saturated disk, or a system drive with no free space, the freeze is a consequence. Resolve the underlying resource metric and re-measure freezes before investigating the application. See the memory swap rate, disk queue, and system free space metrics.")}
+    ]},
+    {q:"On virtual or remote sessions, did the application freeze or did the session?", hint:"A stalled remoting protocol presents to the user as a frozen application.", cont:"The application itself froze", exits:[
+      {b:"The session or protocol stalled", c:hyp("Remoting or host contention","The platform stalled, not the application","noisy",{
+        confirms:"Freezes affect every application in the session at the same moment rather than one; they coincide with host CPU or memory contention, or with protocol latency; physical devices running the same application version are unaffected.",
+        kills:"A single application freezes while others in the same session remain responsive.",
+        now:"Refer to the virtual desktop platform team with the session, host, and protocol evidence.",
+        structural:"Host sizing and session density, and protocol configuration appropriate to the network path in use."})}
+    ]}
+  ],
+  dims:[
+    {dim:"Application version and build", alias:"the most direct dimension, and usually the answer when an onset date exists", cards:[
+      hyp("Version regression","One version, one deployment, one date","step",{mode:"recover",
+        confirms:"The freeze rate per hour of use separates clearly by version; the onset matches the deployment; a cohort held on the previous version is unaffected.",
+        kills:"All versions freeze at a comparable rate once normalised.",
+        now:"Pin or roll back the version for the affected group.",
+        structural:"Raise a vendor case supported by the version comparison; add interface responsiveness to release acceptance testing for this application."})
+    ]},
+    {dim:"Add-in, plug-in, or extension", alias:"distinctive to software with an interface, and it correlates with department, since add-ins are deployed per function", cards:[
+      hyp("Add-in or extension regression","Third-party code running inside the interface thread","step",{mode:"recover",
+        confirms:"The freeze rate separates by the presence or version of a specific add-in; devices without it are unaffected while running the same application version; the onset matches the add-in deployment.",
+        kills:"Devices without the add-in freeze at the same rate.",
+        now:"Disable the add-in for a test group and re-measure before making the change permanent.",
+        structural:"Version control and an approval step for add-ins; raise a vendor case for the add-in itself."}),
+      hyp("Accumulated extensibility load","Many add-ins, each acceptable, collectively significant","flathigh",{mode:"improve",
+        confirms:"The freeze rate rises with the number of installed add-ins rather than with any single one; devices with a minimal set are consistently faster at the same application version.",
+        kills:"The freeze rate is unrelated to the number of add-ins installed.",
+        now:"Remove add-ins that have no owner or no current business use.",
+        structural:"An approved add-in catalogue with an owner for each entry, and a review whenever the host application is upgraded."})
+    ]},
+    {dim:"Graphics processor and display driver", alias:"correlates with hardware model and the refresh cycle", cards:[
+      hyp("Rendering or hardware acceleration fault","The interface stalls in the graphics path","step",{mode:"recover",
+        confirms:"The freeze rate concentrates on one graphics driver revision; the onset matches the driver deployment; disabling hardware acceleration in the application removes the freezes on a test group.",
+        kills:"Distributed evenly across driver revisions.",
+        now:"Roll back the driver, or disable hardware acceleration for the affected group as an interim measure.",
+        structural:"Add interface responsiveness to display driver validation, and align the driver baseline across the fleet rather than allowing it to drift by model."})
+    ]},
+    {dim:"File or resource location", alias:"correlates with site, because file services are usually local to a location", cards:[
+      hyp("Blocking file or network access","The interface thread is waiting on a remote path","noisy",{mode:"both",
+        confirms:"Freezes cluster on open, save, and browse operations against mapped drives, network shares, or synchronised folders rather than local storage; the rate correlates with latency to that path; users working on local files are unaffected.",
+        kills:"Freezes occur while the user is working entirely on local files.",
+        now:"Move the working set to a local or cached location; confirm the path is reachable and that offline handling is configured.",
+        structural:"Review file service placement and path latency per site; adopt cached or on-demand access rather than direct access to remote paths."})
+    ]},
+    {dim:"Security or data protection agent version", alias:"usually deployed fleet-wide, so a cohort here indicates a policy group rather than a version", cards:[
+      hyp("On-access scanning or content inspection","Every file operation is intercepted before it completes","hump",{mode:"both",
+        confirms:"Freezes cluster on file open, save, and copy operations; the rate separates by agent version or policy group; a group with the application working paths excluded is unaffected.",
+        kills:"Freezes occur without file activity, or the rate is identical across policy groups.",
+        now:"Apply a scoped exclusion for the application working paths, agreed with the security team.",
+        structural:"A standing review of on-access scanning scope against application responsiveness, with exclusions documented rather than applied informally."})
+    ]},
+    {dim:"Business unit or role", alias:"frequently a line-of-business application, or the backend service it depends on", cards:[
+      hyp("Line-of-business application or backend latency","The interface waits for a server that is slow","hump",{mode:"both",
+        confirms:"The freeze rate concentrates in one function; the application is specific to that function or queries a shared backend; the rate rises during known busy periods such as month end.",
+        kills:"Evenly distributed across functions.",
+        now:"Correlate the freeze times with backend response times and raise the finding with the application owner.",
+        structural:"Application design review for synchronous calls on the interface thread, and backend capacity planning for peak periods."})
+    ]}
+  ],
+  randomRecover:[
+    hyp("Fleet-wide application or platform update","Deployed to everyone, so no cohort appears","step",{
+      confirms:"A single onset date across all segments; the application, its runtime, or the operating system was updated on that date; no version, model, or department split.",
+      kills:"Any segment is materially cleaner.",
+      now:"Work from the onset date rather than device attributes, and list everything deployed to the whole estate on that day.",
+      structural:"Staged deployment rings, so that the next occurrence is confined to a cohort that can be identified early."}),
+    hyp("Backend or file service change","Nothing changed on the endpoint, which is the signature","step",{
+      confirms:"A uniform onset with no endpoint change; a file service, authentication service, or application backend changed on that date; the freezes cluster on operations that depend on it.",
+      kills:"An endpoint-side split exists.",
+      now:"Correlate the onset date with application and infrastructure change records rather than endpoint records.",
+      structural:"Include endpoint experience data in application and infrastructure change review."})
+  ],
+  randomImprove:[
+    hyp("Application design","The interface thread performs work that should be asynchronous","flathigh",{
+      confirms:"Freezes are distributed across the estate with no cohort; the affected applications perform file, database, or network access on the interface thread; the pattern holds regardless of hardware.",
+      kills:"A clean cohort exists.",
+      now:"No tactical action; document the behaviour for the application owner with the usage-normalised evidence.",
+      structural:"Interface responsiveness as an acceptance criterion for both procured and internally developed applications."}),
+    hyp("Remote file access as the standard working pattern","Every document is opened across the network","flathigh",{
+      confirms:"Freezes are broadly distributed and cluster on file operations; the standard configuration places working files on remote paths for all users.",
+      kills:"Users working locally freeze at the same rate.",
+      now:"No tactical action at fleet scale.",
+      structural:"Cached or on-demand file access as the default, and a review of file service placement relative to where users actually work."}),
+    hyp("Resource baseline","The estate has no headroom, so every application stalls occasionally","flathigh",{
+      confirms:"Freezes are uniform across applications and devices and coincide with routine paging or storage saturation rather than with any application attribute.",
+      kills:"Freezes concentrate in specific applications.",
+      now:"No tactical action.",
+      structural:"The hardware baseline is the constraint. See the memory swap and storage metrics, which are the underlying cause."})
+  ],
+  verify:"Freeze events per hour of active use, together with the distribution of freeze durations, for the affected cohort against a control group running the same application version on unaffected devices. Confirm the affected cohort converges toward the control group after the change.",
+  correlate:"Read alongside memory swap rate, disk queue, and system free space, each of which produces freezes without any fault in the application. Read alongside application crash counts as well, since a freeze that does not recover is often terminated and recorded as a crash."
 }
 ];
 
@@ -971,6 +1090,24 @@ const NLQ = {
     ],
     random:"Over the past 30 days, show the daily average Wi-Fi signal quality across all devices to find the onset date, then list fleet-wide driver or power-policy deployments, and any network-side change (controller firmware, channel plan, or authentication) on that date.",
     verify:"Over the past 7 days, compare signal strength, noise, negotiated rate, and one impact measure for the affected cohort against a control group, and confirm convergence after the fix."
+  },
+  freezes:{
+    disclaimer:"Over the past 30 days, compare the weekly freeze rate per hour of active use between a fixed population of devices reporting 30 days ago and all devices reporting today, to rule out onboarding. Note any application, operating system, or add-in migration in the period, and any change to the freeze threshold or score definition.",
+    gates:[
+      "Over the past 7 days, for each application with recorded freeze events, show the number of freeze events, the total active or focus usage time, and the resulting freeze rate per hour of use, broken down by application and version, with the number of devices per group. Rank by rate per hour of use rather than by event count, and flag applications above 1 freeze per hour of use.",
+      "Over the past 7 days, for devices with recorded application freezes, show at the same time intervals as the freeze events: memory swap rate, used memory as a percentage of installed memory, disk queue length, and system-drive free space. Show the proportion of freeze events that coincide with paging above 1 MB/s, disk queue at or above 1, or free space below 10 GB.",
+      "Over the past 7 days, compare the freeze rate per hour of use for the same application version between virtual or remote sessions and physical devices, broken down by session host or pool, and show host CPU and memory contention and session protocol latency at the times of the freeze events."
+    ],
+    dims:[
+      "Over the past 14 days, for the affected application, show the freeze rate per hour of use broken down by application version and build, with the number of devices per version and the deployment date of each version.",
+      "Over the past 14 days, for devices running the affected application at the same version, compare the freeze rate per hour of use between devices that have each installed add-in, plug-in, or extension and devices that do not, broken down by add-in and version, with device counts per group.",
+      "Over the past 14 days, show the freeze rate per hour of use for the affected application broken down by graphics processor model and display driver version, with device counts per group and the driver deployment date.",
+      "Over the past 7 days, for freeze events in the affected application, break down the freeze rate by the location of the file or resource being accessed — local drive, mapped network drive, network share, or synchronised folder — and show network latency to each path, broken down by site.",
+      "Over the past 14 days, show the freeze rate per hour of use for the affected application broken down by security or data protection agent version and policy group, with device counts and agent deployment dates.",
+      "Over the past 7 days, show the freeze rate per hour of use broken down by entity or department, with device counts per group, and list the applications specific to the groups with the highest rate."
+    ],
+    random:"Over the past 30 days, show the daily freeze rate per hour of use for the affected application across all devices to identify the onset date, then list application updates, runtime or operating system updates, security agent updates, display driver deployments, and backend or file service changes on or shortly before that date.",
+    verify:"Over the past 7 days, compare the freeze rate per hour of use and the distribution of freeze durations for the affected cohort against a control group running the same application version on unaffected devices, and confirm convergence after the change."
   }
 };
 
@@ -1051,7 +1188,7 @@ function panelHTML(t){
 
   const hub = t.hub ? `
     <div class="hub">
-      <b class="mono">THIS METRIC IS OFTEN THE ROOT CAUSE OF OTHER SYMPTOMS</b>
+      <b class="mono">${t.hub.label || "THIS METRIC IS OFTEN THE ROOT CAUSE OF OTHER SYMPTOMS"}</b>
       <p>${t.hub.lead}</p>
       <ul>${t.hub.items.map(i=>`<li>${i}</li>`).join("")}</ul>
       <p class="close">${t.hub.close}</p>
